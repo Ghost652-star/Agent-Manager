@@ -1,0 +1,70 @@
+{
+  "name": "agent-manager",
+  "version": "1.0.1",
+  "description": "在隔离的 Git Worktree 中管理并启动多个 CLI Agent",
+  "main": "main.js",
+  "scripts": {
+    "start": "set ELECTRON_RUN_AS_NODE=&& electron .",
+    "build": "node scripts/clean-dist.js && electron-builder"
+  },
+  "build": {
+    "appId": "com.agentmanager.app",
+    "productName": "Agent Manager",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "renderer.js",
+      "styles.css",
+      "worktree.js",
+      "git.js",
+      "agents.js",
+      "config.js",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "AgentManager-Portable-${version}.exe"
+    },
+    "npmRebuild": false,
+    "nodeGypRebuild": false
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.0"
+  },
+  "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.1.0",
+    "marked": "^18.1.1",
+    "node-pty": "^1.0.0",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0",
+    "xterm-addon-web-links": "^0.9.0"
+  }
+}
