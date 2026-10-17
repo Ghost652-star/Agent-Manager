@@ -523,6 +523,12 @@
       let w = (dir === 'left' || dir === 'inner') ? startW + delta : startW - delta;
       w = Math.max(minW, Math.min(w, maxW));
       appEl.style.setProperty(cssVar, `${w}px`);
+      if (dir === 'inner') {
+        // 拖动内部条时，若文件树变宽，应同步撑开外部文件面板，避免文件树被截断
+        const explorerW = parseFloat(getComputedStyle(appEl).getPropertyValue('--explorer-w')) || 420;
+        const newExplorerW = Math.max(explorerW, Math.min(640, w + 80));
+        appEl.style.setProperty('--explorer-w', `${newExplorerW}px`);
+      }
       if (dir !== 'inner') fitAllTerminals();
     });
 

@@ -49,7 +49,7 @@ html, body {
 
 .app {
   --sidebar-w: 280px;
-  --explorer-w: 320px;
+  --explorer-w: 420px;
   display: flex;
   height: 100vh;
   width: 100vw;
@@ -769,7 +769,7 @@ body.dragging .explorer {
 
 /* ---------- 右侧文件面板（左右分栏：查看器 | 文件树） ---------- */
 .explorer {
-  --tree-w: 240px;
+  --tree-w: 300px;
   width: var(--explorer-w);
   min-width: var(--explorer-w);
   background: var(--surface);

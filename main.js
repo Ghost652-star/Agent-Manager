@@ -156,7 +156,12 @@ ipcMain.handle('fs:readfile', async (e, { root, relPath }) => {
       return { success: false, error: `文件过大（${(stat.size / 1024 / 1024).toFixed(1)}MB），不支持预览` };
     }
     const buf = await fsp.readFile(target);
-    if (buf.includes(0)) return { success: false, error: '二进制文件，不支持预览' };
+    if (buf.includes(0)) {
+      const ext = path.extname(target).toLowerCase();
+      if (ext === '.class') return { success: false, error: 'Java 编译后的字节码文件（.class），请查看对应的 .java 源文件。' };
+      if (['.jar', '.war', '.ear'].includes(ext)) return { success: false, error: 'Java 归档压缩包，二进制文件，不支持预览。' };
+      return { success: false, error: '二进制文件，不支持预览' };
+    }
     const content = buf.toString('utf-8');
     return { success: true, content, truncated: false, maxLines: MAX_PREVIEW_LINES };
   } catch (err) {

@@ -1,6 +1,6 @@
 {
   "name": "agent-manager",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "在隔离的 Git Worktree 中管理并启动多个 CLI Agent",
   "main": "main.js",
   "scripts": {
