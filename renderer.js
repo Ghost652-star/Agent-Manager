@@ -72,8 +72,8 @@
     const session = sessions.get(sessionId);
     if (session) {
       session.exited = true;
-      const badge = session.tabEl.querySelector('.tab-agent');
-      if (badge) badge.style.color = 'var(--text-dim)';
+      // 用类名控制视觉状态，避免直接写内联样式
+      session.tabEl.classList.add('exited');
     }
   });
 
@@ -92,12 +92,20 @@
       const li = document.createElement('li');
       li.className = 'agent-item';
       li.title = `点击在 worktree 中启动 ${agent.label}`;
+      li.tabIndex = 0;
+      li.setAttribute('role', 'button');
       li.innerHTML = `
         <span class="agent-status"></span>
         <span class="agent-name">${escapeHtml(agent.label)}</span>
         <span class="agent-cmd">${escapeHtml(agent.command)}</span>
       `;
       li.addEventListener('click', () => launchAgent(agent));
+      li.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          launchAgent(agent);
+        }
+      });
       els.agentList.appendChild(li);
     }
   }
@@ -253,19 +261,29 @@
   }
 
   function createTab(sessionId, agent) {
-    const tab = document.createElement('button');
+    // 用 div + role=tab 而不是 button：内部还要放关闭按钮，嵌套 button 不合法
+    const tab = document.createElement('div');
     tab.className = 'tab';
     tab.dataset.session = sessionId;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', 'false');
+    tab.tabIndex = 0;
     tab.innerHTML = `
       <span class="tab-project hidden">…</span>
       <span class="tab-agent">${escapeHtml(agent.label)}</span>
       <span class="tab-wt">…</span>
-      <span class="tab-close" title="关闭">×</span>
+      <button class="tab-close" type="button" title="关闭会话" aria-label="关闭会话">×</button>
     `;
     tab.addEventListener('click', e => {
-      if (e.target.classList.contains('tab-close')) {
+      if (e.target.closest('.tab-close')) {
         closeSession(sessionId);
       } else {
+        switchTab(sessionId);
+      }
+    });
+    tab.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
         switchTab(sessionId);
       }
     });
@@ -294,9 +312,13 @@
     container.style.height = '100%';
     session.contentEl.appendChild(container);
 
-    // 更新 tab 上的 worktree 路径
+    // 更新 tab 上的 worktree 路径（只显示末两段，完整路径放 title，避免标签过长）
     const wtEl = session.tabEl.querySelector('.tab-wt');
-    if (wtEl) wtEl.textContent = worktreePath;
+    if (wtEl) {
+      const segs = worktreePath.replace(/\\/g, '/').split('/').filter(Boolean);
+      wtEl.textContent = segs.slice(-2).join('/');
+      wtEl.title = worktreePath;
+    }
 
     const term = new Terminal({
       cursorBlink: true,
@@ -349,6 +371,7 @@
     for (const session of sessions.values()) {
       const isActive = session.sessionId === sessionId;
       session.tabEl.classList.toggle('active', isActive);
+      session.tabEl.setAttribute('aria-selected', isActive ? 'true' : 'false');
       session.contentEl.classList.toggle('active', isActive);
       if (isActive && session.terminal) {
         requestAnimationFrame(() => {
@@ -405,11 +428,16 @@
     pendingWtRoot = appConfig.worktreeRoot || null;
     els.settingsConfigDir.textContent = appConfig.configDir || '<软件目录>\\data\\config.json';
     renderSettingsWtRoot();
-    els.settingsModal.classList.remove('hidden');
+    els.settingsModal.classList.add('open');
+    els.settingsModal.setAttribute('aria-hidden', 'false');
+    // 打开后把焦点移进弹窗，键盘用户不会迷失位置
+    setTimeout(() => els.btnCloseSettings.focus(), 120);
   }
 
   function closeSettings() {
-    els.settingsModal.classList.add('hidden');
+    els.settingsModal.classList.remove('open');
+    els.settingsModal.setAttribute('aria-hidden', 'true');
+    els.btnSettings.focus();
   }
 
   function renderSettingsWtRoot() {
@@ -525,7 +553,7 @@
       appEl.style.setProperty(cssVar, `${w}px`);
       if (dir === 'inner') {
         // 拖动内部条时，若文件树变宽，应同步撑开外部文件面板，避免文件树被截断
-        const explorerW = parseFloat(getComputedStyle(appEl).getPropertyValue('--explorer-w')) || 420;
+        const explorerW = parseFloat(getComputedStyle(appEl).getPropertyValue('--explorer-w')) || 560;
         const newExplorerW = Math.max(explorerW, Math.min(640, w + 80));
         appEl.style.setProperty('--explorer-w', `${newExplorerW}px`);
       }
@@ -622,6 +650,7 @@
     }
     expLoadedRoot = root;
     els.expRootPath.textContent = expSelection === 'proj' ? `[项目·真实] ${root}` : `[worktree] ${root}`;
+    els.expRootPath.title = root;
     els.expTree.innerHTML = '';
     const ul = document.createElement('ul');
     ul.className = 'tree-list';
@@ -657,6 +686,9 @@
       const rel = relPath ? `${relPath}\\${entry.name}` : entry.name;
       const item = document.createElement('div');
       item.className = `tree-item ${entry.isDir ? 'is-dir' : 'is-file'}`;
+      item.tabIndex = 0;
+      item.setAttribute('role', 'treeitem');
+      item.dataset.rel = rel;
       // worktree 改动标色：新增=绿，其他改动=琥珀
       let modClass = '';
       if (!entry.isDir && changedMap.has(rel)) {
@@ -674,6 +706,12 @@
 
       if (entry.isDir) {
         item.addEventListener('click', () => toggleDir(li, item, rel));
+        item.addEventListener('keydown', e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            toggleDir(li, item, rel);
+          }
+        });
         if (expandedDirs.has(rel)) {
           item.classList.add('expanded');
           const childUl = document.createElement('ul');
@@ -682,10 +720,17 @@
           renderDir(rel, childUl);
         }
       } else {
-        item.addEventListener('click', () => {
+        const selectFile = () => {
           els.expTree.querySelectorAll('.tree-item.selected').forEach(el => el.classList.remove('selected'));
           item.classList.add('selected');
           openFile(rel, entry.name);
+        };
+        item.addEventListener('click', selectFile);
+        item.addEventListener('keydown', e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            selectFile();
+          }
         });
       }
       container.appendChild(li);
@@ -968,6 +1013,12 @@
   els.btnSelectWtRoot.addEventListener('click', selectWtRoot);
   els.btnResetWtRoot.addEventListener('click', resetWtRoot);
   els.btnSaveSettings.addEventListener('click', saveSettings);
+
+  // 弹窗：点击遮罩或按 Esc 关闭
+  els.settingsModal.querySelector('.modal-backdrop').addEventListener('click', closeSettings);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && els.settingsModal.classList.contains('open')) closeSettings();
+  });
 
   // 项目选择器：切换当前 UI 上下文
   els.projectSelect.addEventListener('change', () => {

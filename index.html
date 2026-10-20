@@ -59,12 +59,18 @@
 
       <div id="empty-state" class="empty-state">
         <div class="empty-icon">&gt;_</div>
+        <div class="empty-kicker">Git Worktree Isolation</div>
         <h1 class="empty-title">选择一个项目，然后点击 Agent 启动</h1>
         <p class="empty-sub">每个 Agent 都会在独立的 Git Worktree 中运行，互不干扰。</p>
+        <div class="empty-hints">
+          <span class="empty-hint"><b>01</b> 打开项目</span>
+          <span class="empty-hint"><b>02</b> 启动 Agent</span>
+          <span class="empty-hint"><b>03</b> 审查分支</span>
+        </div>
       </div>
 
       <div id="terminal-area" class="terminal-area hidden">
-        <div class="tabs" id="tabs"></div>
+        <div class="tabs" id="tabs" role="tablist" aria-label="Agent 会话"></div>
         <button id="btn-git-status" class="git-btn" title="查看各 agent 工作树的 Git 状态（只读）">⎇ Git 状态</button>
         <div class="tab-contents" id="tab-contents"></div>
       </div>
@@ -119,7 +125,7 @@
     <button id="btn-expand-explorer" class="edge-btn edge-right hidden" title="展开文件面板" aria-label="展开文件面板">«</button>
   </div>
 
-  <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  <div id="settings-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title" aria-hidden="true">
     <div class="modal-backdrop"></div>
     <div class="modal-panel">
       <div class="modal-header">
