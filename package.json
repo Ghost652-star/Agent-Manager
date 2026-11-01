@@ -1,6 +1,6 @@
 {
   "name": "agent-manager",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "在隔离的 Git Worktree 中管理并启动多个 CLI Agent",
   "main": "main.js",
   "scripts": {
@@ -24,7 +24,12 @@
       "git.js",
       "agents.js",
       "config.js",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "!node_modules/node-pty/prebuilds/win32-arm64/**",
+      "!node_modules/node-pty/prebuilds/darwin-*/**",
+      "!node_modules/node-pty/deps/**",
+      "!node_modules/node-pty/third_party/**",
+      "!node_modules/node-pty/src/**"
     ],
     "win": {
       "target": [
@@ -61,6 +66,8 @@
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.1.0",
+    "chokidar": "^3.6.0",
+    "dompurify": "^3.4.17",
     "marked": "^18.1.1",
     "node-pty": "^1.0.0",
     "xterm": "^5.3.0",

@@ -1536,6 +1536,19 @@ body.dragging .file-tree {
   background: rgba(46, 204, 113, 0.12);
 }
 
+.git-actions {
+  margin-top: var(--space-2);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.git-cleaned {
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+
 .git-project-header {
   font-size: 9.5px;
   font-weight: 600;

@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   selectProject: () => ipcRenderer.invoke('app:select-project'),
   selectDirectory: opts => ipcRenderer.invoke('app:select-directory', opts),
+  openExternal: url => ipcRenderer.invoke('app:open-external', { url }),
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: cfg => ipcRenderer.invoke('config:set', cfg),
   detectAgents: () => ipcRenderer.invoke('agent:detect'),

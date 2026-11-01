@@ -1,8 +1,10 @@
-const { app, BrowserWindow, ipcMain, dialog, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Notification, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
+const { execFile } = require('child_process');
 const pty = require('node-pty');
+const chokidar = require('chokidar');
 const worktree = require('./worktree');
 const git = require('./git');
 const agents = require('./agents');
@@ -10,6 +12,20 @@ const config = require('./config');
 
 const sessions = new Map();
 let mainWindow;
+
+// Windows 上杀掉 PowerShell 本身不会带走它启动的 agent 子进程，
+// 用 taskkill /T 结束整棵进程树，避免后台残留 node/claude 进程。
+function killSessionProcess(session) {
+  if (!session || !session.pty) return;
+  const term = session.pty;
+  if (process.platform === 'win32' && term.pid) {
+    execFile('taskkill', ['/PID', String(term.pid), '/T', '/F'], { windowsHide: true }, () => {
+      try { term.kill(); } catch { /* 已退出 */ }
+    });
+    return;
+  }
+  try { term.kill(); } catch { /* 已退出 */ }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -23,20 +39,51 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      // preload 只用到 contextBridge / ipcRenderer，开沙箱不会有副作用
+      sandbox: true
     }
+  });
+
+  // 禁止页面被导航走（例如点开 README 里的外链）；外链交给系统浏览器
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url === mainWindow.webContents.getURL()) return;
+    event.preventDefault();
+    if (/^https?:/i.test(url)) shell.openExternal(url);
   });
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
   mainWindow.on('closed', () => {
-    sessions.forEach(s => s.pty.kill());
+    sessions.forEach(s => killSessionProcess(s));
     sessions.clear();
+    if (fsWatcher) {
+      try { fsWatcher.close(); } catch { /* 忽略 */ }
+      fsWatcher = null;
+    }
     mainWindow = null;
   });
 }
 
-app.whenReady().then(createWindow);
+// 单实例：第二个实例直接唤起已有窗口，避免两个进程同时写 config、抢 worktree
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+
+  app.whenReady().then(createWindow);
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
@@ -62,6 +109,20 @@ ipcMain.handle('app:select-directory', async (e, { title = '选择目录' } = {}
 
 ipcMain.handle('config:get', () => config.read());
 ipcMain.handle('config:set', (e, cfg) => config.write(cfg));
+
+// 只允许用系统浏览器打开 http/https/mailto，其他协议一律拒绝
+ipcMain.handle('app:open-external', async (e, { url }) => {
+  try {
+    const parsed = new URL(String(url));
+    if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol)) {
+      return { success: false, error: '不支持的链接协议' };
+    }
+    await shell.openExternal(parsed.href);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
 
 // ---------- 文件面板（只读浏览） ----------
 
@@ -116,10 +177,16 @@ ipcMain.handle('git:diff', async (e, { wtPath, relPath }) => {
   }
 });
 
-// ---------- 文件树自动刷新（fs.watch，仅监视当前浏览根目录） ----------
+// ---------- 文件树自动刷新（chokidar，仅监视当前浏览根目录） ----------
 
 let fsWatcher = null;
 let fsWatchNotifyTimer = null;
+
+// 这些目录/文件的变化不触发刷新：体积大、刷新无意义，且会造成事件风暴
+const WATCH_IGNORED_DIRS = new Set([
+  '.git', 'node_modules', 'target', 'dist', 'build', 'out',
+  '.idea', '.vscode', '.gradle', '.mvn', 'coverage'
+]);
 
 ipcMain.handle('fs:watch', (e, { root }) => {
   if (fsWatcher) {
@@ -128,16 +195,33 @@ ipcMain.handle('fs:watch', (e, { root }) => {
   }
   if (!root || !fs.existsSync(root)) return { success: false, error: '目录不存在' };
   const base = path.resolve(root);
+
+  const shouldIgnore = p => {
+    const rel = path.relative(base, p);
+    if (!rel) return false; // 根目录本身不能忽略
+    if (rel.split(path.sep).some(seg => WATCH_IGNORED_DIRS.has(seg))) return true;
+    return /\.(class|jar|war|ear|log|tmp)$/i.test(p);
+  };
+
   try {
-    fsWatcher = fs.watch(base, { recursive: true }, () => {
-      if (fsWatchNotifyTimer) return; // 事件风暴时节流，1 秒最多通知一次
+    fsWatcher = chokidar.watch(base, {
+      ignoreInitial: true,
+      ignored: shouldIgnore,
+      awaitWriteFinish: { stabilityThreshold: 300, pollInterval: 100 }
+    });
+
+    const notify = () => {
+      if (fsWatchNotifyTimer) return; // 事件风暴时节流，600ms 最多通知一次
       fsWatchNotifyTimer = setTimeout(() => {
         fsWatchNotifyTimer = null;
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('fs:changed', { root: base });
         }
-      }, 1000);
-    });
+      }, 600);
+    };
+
+    fsWatcher.on('add', notify).on('change', notify).on('unlink', notify)
+      .on('addDir', notify).on('unlinkDir', notify);
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
@@ -174,18 +258,17 @@ ipcMain.handle('agent:detect', async () => agents.detect());
 // ---------- 任务完成通知（空闲检测） ----------
 // 原理：终端持续无输出 + 软件窗口不在前台 → 弹系统通知。
 // 不做关键词匹配（各家 agent 提示语不同且常变，误报率高），只用两个稳定信号。
-// 每个会话 5 分钟最多提醒一次，点通知跳转到对应 tab。
+// 每段空闲只提醒一次：只有产生新输出后才重新武装，避免人不在时每 5 分钟骚扰。
 
-const IDLE_NOTIFY_MS = 60 * 1000;        // 终端空闲 60 秒视为"可能完成"
-const NOTIFY_THROTTLE_MS = 5 * 60 * 1000; // 同一会话 5 分钟内不重复提醒
+const IDLE_NOTIFY_MS = 60 * 1000; // 终端空闲 60 秒视为"可能完成"
 
 setInterval(() => {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isFocused()) return;
   const now = Date.now();
   for (const [sessionId, s] of sessions) {
-    if (s.exited || !s.lastDataAt) continue;
+    if (s.exited || !s.lastDataAt || s.idleNotified) continue;
     const idleFor = now - s.lastDataAt;
-    if (idleFor >= IDLE_NOTIFY_MS && now - (s.lastNotifiedAt || 0) >= NOTIFY_THROTTLE_MS) {
+    if (idleFor >= IDLE_NOTIFY_MS) {
       try {
         const n = new Notification({
           title: `${s.agentCommand} 可能已经完成 / 等你输入`,
@@ -203,17 +286,29 @@ setInterval(() => {
       } catch {
         // 系统不支持通知时静默跳过
       }
-      s.lastNotifiedAt = now;
+      s.idleNotified = true;
     }
   }
 }, 5000);
 
 ipcMain.handle('agent:launch', async (e, { projectPath, agentCommand, sessionId }) => {
   try {
+    // 命令来自检测列表，仍做一次白名单校验，避免被拼接成任意命令
+    if (!/^[A-Za-z0-9._-]+$/.test(String(agentCommand))) {
+      throw new Error('非法的 agent 命令');
+    }
+
     const cfg = config.read();
     const wtPath = await worktree.ensure(projectPath, agentCommand, cfg);
-    const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
-    const p = pty.spawn(shell, [], {
+
+    // Windows 用 -NoExit -Command 直接把 agent 作为 shell 的初始命令执行，
+    // 不再依赖“等 600ms 再敲命令”的时序，慢机器也不会丢命令。
+    const shellPath = process.platform === 'win32' ? 'powershell.exe' : 'bash';
+    const shellArgs = process.platform === 'win32'
+      ? ['-NoLogo', '-NoExit', '-Command', agentCommand]
+      : ['-c', agentCommand];
+
+    const p = pty.spawn(shellPath, shellArgs, {
       name: 'xterm-256color',
       cwd: wtPath,
       env: process.env
@@ -225,13 +320,16 @@ ipcMain.handle('agent:launch', async (e, { projectPath, agentCommand, sessionId 
       agentCommand,
       projectPath,
       lastDataAt: Date.now(),
-      lastNotifiedAt: 0,
+      idleNotified: false,
       exited: false
     });
 
     p.onData(data => {
       const s = sessions.get(sessionId);
-      if (s) s.lastDataAt = Date.now();
+      if (s) {
+        s.lastDataAt = Date.now();
+        s.idleNotified = false; // 有新输出 → 下一段空闲可以再次提醒
+      }
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('pty:data', { sessionId, data });
       }
@@ -245,11 +343,6 @@ ipcMain.handle('agent:launch', async (e, { projectPath, agentCommand, sessionId 
       }
       sessions.delete(sessionId);
     });
-
-    // 让 shell 初始化一会儿，再自动输入 agent 命令
-    setTimeout(() => {
-      p.write(`${agentCommand}\r`);
-    }, 600);
 
     return { success: true, worktreePath: wtPath };
   } catch (err) {
@@ -269,16 +362,20 @@ ipcMain.on('pty:resize', (e, { sessionId, cols, rows }) => {
 
 ipcMain.on('pty:kill', (e, { sessionId }) => {
   const s = sessions.get(sessionId);
-  if (s) {
-    s.pty.kill();
+  if (!s) return;
+  const finish = () => {
+    killSessionProcess(s);
     sessions.delete(sessionId);
-  }
+  };
+  if (s.exited) return finish();
+  // 先发 Ctrl+C 让 agent 有机会收尾，400ms 后再强杀
+  try { s.pty.write('\x03'); } catch { /* 忽略 */ }
+  setTimeout(finish, 400);
 });
 
-ipcMain.handle('worktree:cleanup', async (e, { projectPath, agentCommand }) => {
+ipcMain.handle('worktree:cleanup', async (e, { projectPath, wtPath }) => {
   try {
-    const cfg = config.read();
-    await worktree.cleanup(projectPath, agentCommand, cfg);
+    await worktree.cleanup(projectPath, wtPath);
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };

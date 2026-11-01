@@ -50,7 +50,11 @@ function write(cfg) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+  // 原子写：先写临时文件再 rename，避免崩溃/断电时留下半截 config.json
+  const target = configPath();
+  const tmp = `${target}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2));
+  fs.renameSync(tmp, target);
 }
 
 module.exports = { read, write };

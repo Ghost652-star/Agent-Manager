@@ -44,8 +44,9 @@ function worktreeRootFor(projectPath, cfg = {}) {
 
 async function branchExists(projectPath, branch) {
   try {
-    const out = await run(projectPath, 'git', ['branch', '--list', branch]);
-    return out.includes(branch);
+    // show-ref --verify 精确匹配，避免 branch --list 的子串误判
+    await run(projectPath, 'git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`]);
+    return true;
   } catch {
     return false;
   }
@@ -81,52 +82,55 @@ async function ensure(projectPath, agentCommand, cfg = {}) {
 
   const safe = sanitize(agentCommand);
   const root = worktreeRootFor(projectPath, cfg);
-  const wtPath = path.join(root, safe);
-
-  // 如果路径已存在且已注册，直接复用
-  const existing = (await listWorktrees(projectPath)).find(w => w.worktree === wtPath);
-  if (existing && fs.existsSync(wtPath)) {
-    return wtPath;
-  }
 
   if (!fs.existsSync(root)) {
     fs.mkdirSync(root, { recursive: true });
   }
 
-  let branch = `agent/${safe}`;
-  let i = 1;
-  while (await branchExists(projectPath, branch)) {
-    branch = `agent/${safe}-${i}`;
-    i++;
+  // 同一个 agent 允许开多个会话：依次寻找 claude、claude-2、claude-3… 的空槽位
+  const registered = await listWorktrees(projectPath);
+  const taken = new Set(registered.map(w => path.resolve(w.worktree).toLowerCase()));
+
+  let index = 1;
+  let wtPath = '';
+  let branch = '';
+  for (;;) {
+    const suffix = index === 1 ? '' : `-${index}`;
+    wtPath = path.join(root, `${safe}${suffix}`);
+    branch = `agent/${safe}${suffix}`;
+    const pathFree = !taken.has(path.resolve(wtPath).toLowerCase()) && !fs.existsSync(wtPath);
+    if (pathFree && !(await branchExists(projectPath, branch))) break;
+    index += 1;
+    if (index > 999) throw new Error('可用 worktree 槽位已用尽（超过 999 个）');
   }
 
   try {
     await run(projectPath, 'git', ['worktree', 'add', wtPath, '-b', branch]);
   } catch (err) {
-    // 可能路径残留但未被 git 识别，尝试清理后重建
-    if (fs.existsSync(wtPath)) {
-      fs.rmSync(wtPath, { recursive: true, force: true });
-    }
-    await run(projectPath, 'git', ['worktree', 'prune']);
-    await run(projectPath, 'git', ['worktree', 'add', wtPath, '-b', branch]);
+    throw new Error(`创建 worktree 失败：${err.message}`);
   }
 
   return wtPath;
 }
 
-async function cleanup(projectPath, agentCommand, cfg = {}) {
-  const safe = sanitize(agentCommand);
-  const root = worktreeRootFor(projectPath, cfg);
-  const wtPath = path.join(root, safe);
+async function cleanup(projectPath, wtPath) {
+  if (!wtPath) throw new Error('缺少 worktree 路径');
+  if (!fs.existsSync(wtPath)) throw new Error('工作树目录不存在，可能已被清理');
 
+  // 先查脏状态：有未提交改动就拒绝，绝不替用户做销毁决定
+  let dirty = '';
   try {
-    await run(projectPath, 'git', ['worktree', 'remove', wtPath]);
+    dirty = (await run(wtPath, 'git', ['status', '--porcelain'])).trim();
   } catch (err) {
-    // 如果 git 不认为它是 worktree，仅删除目录
-    if (fs.existsSync(wtPath)) {
-      fs.rmSync(wtPath, { recursive: true, force: true });
-    }
+    throw new Error(`无法读取工作树状态：${err.message}`);
   }
+  if (dirty) {
+    const count = dirty.split(/\r?\n/).filter(Boolean).length;
+    throw new Error(`工作树还有 ${count} 个未提交改动，已取消清理。请先提交或手动处理。`);
+  }
+
+  // 不加 --force，失败时也不 rm -rf：宁可留下目录，也不能误删成果
+  await run(projectPath, 'git', ['worktree', 'remove', wtPath]);
   await run(projectPath, 'git', ['worktree', 'prune']);
 }
 

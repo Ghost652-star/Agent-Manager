@@ -7,7 +7,7 @@
 ## 功能特性
 
 - **多 Agent 并行**：同时启动任意多个 Agent 会话，每个会话一个终端 Tab
-- **Git Worktree 隔离**：每个 Agent 自动获得独立的工作树和分支（`agent/<agent名>`），彻底避免多 Agent 同时改一个目录导致的冲突
+- **Git Worktree 隔离**：每个 Agent 自动获得独立的工作树和分支（`agent/<agent名>`）；同一个 Agent 多开时自动编号为 `agent/claude-2`、`agent/claude-3`，不会互相覆盖
 - **终端内嵌**：基于 node-pty + xterm.js 的真实终端体验，支持 256 色
 - **Git 状态面板**：只读查看各 Agent 工作树的脏文件、领先/落后主分支的提交数、最新提交，以及单文件 diff
 - **文件浏览器**：实时浏览各 Agent Worktree 的文件改动，支持只读文件预览（2MB 以内文本文件）
@@ -48,10 +48,10 @@ npm run build
 
 1. **打开项目**：点击「打开新项目」选择一个本地项目目录（非 Git 仓库会自动 `git init`）
 2. **选择 Agent**：左侧「已安装 Agent」列表会显示检测到的 CLI Agent，点击即可启动
-3. **开始工作**：Agent 会在 `<盘符>:\agent-worktrees\<项目名>\<agent>` 下运行，改动不会影响你的主工作区
+3. **开始工作**：Agent 会在 `<盘符>:\agent-worktrees\<项目名>\<agent>` 下运行（同一 Agent 多开时依次为 `<agent>-2`、`<agent>-3`），改动不会影响你的主工作区
 4. **查看改动**：通过「⎇ Git 状态」按钮和右侧文件面板，实时查看各 Agent 的改动
 5. **合并成果**：哪个 Agent 的改动满意，就到项目目录里把对应分支（`agent/<agent名>`）合并回主分支
-6. **清理**：设置中可对指定 Agent 的 Worktree 执行清理（`git worktree remove` + `prune`）
+6. **清理**：在「⎇ Git 状态」面板里清理已退出会话的 Worktree；如果工作树还有未提交改动，清理会被拒绝，不会误删
 
 ## 配置存储
 

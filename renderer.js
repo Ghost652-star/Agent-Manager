@@ -390,6 +390,12 @@
     const session = sessions.get(sessionId);
     if (!session) return;
 
+    // agent 还在跑时先确认，避免误点把正在进行的任务中断
+    if (!session.exited) {
+      const ok = confirm(`「${session.agent.label}」可能仍在运行，确定关闭会话？\n\n未提交的改动会保留在工作树中。`);
+      if (!ok) return;
+    }
+
     window.api.ptyKill({ sessionId });
     if (session.terminal) session.terminal.dispose();
 
@@ -577,6 +583,8 @@
   let expandedDirs = new Set();  // 已展开目录（相对路径），刷新时保留
   let currentFile = null;        // { root, relPath, name }
   let changedMap = new Map();    // worktree 改动文件（相对路径 → 状态 M/??/A...），用于标色和 diff
+  let gitStatusRoot = null;      // 上次 git status 对应的根目录
+  let gitStatusAt = 0;           // 上次 git status 的时间戳（用于节流）
   let viewerMode = 'content';    // 'content' | 'diff'
 
   // 把「所有运行中 agent 的 worktree + 真实项目目录」填进下拉框
@@ -657,15 +665,23 @@
     els.expTree.appendChild(ul);
 
     // worktree 模式：拉取 git 改动列表用于标色，并监视文件变化自动刷新
-    changedMap = new Map();
     if (expSelection !== 'proj') {
-      const st = await window.api.gitStatus({ projectPath, wtPath: root });
-      if (st.success && Array.isArray(st.dirty)) {
-        for (const d of st.dirty) {
-          changedMap.set(d.file.replace(/\//g, '\\'), d.status);
+      const now = Date.now();
+      // git status 在大仓库上开销不低：同一根目录 1.5 秒内复用上次结果
+      if (gitStatusRoot !== root || now - gitStatusAt > 1500) {
+        const st = await window.api.gitStatus({ projectPath, wtPath: root });
+        changedMap = new Map();
+        if (st.success && Array.isArray(st.dirty)) {
+          for (const d of st.dirty) {
+            changedMap.set(d.file.replace(/\//g, '\\'), d.status);
+          }
         }
+        gitStatusRoot = root;
+        gitStatusAt = now;
       }
       window.api.watchTree({ root }).catch(() => {});
+    } else {
+      changedMap = new Map();
     }
 
     await renderDir('', ul);
@@ -681,7 +697,10 @@
       container.innerHTML = '<li class="explorer-hint">（空目录）</li>';
       return;
     }
-    for (const entry of res.entries) {
+    // 超大目录只渲染前 800 项，避免一次生成上万个 DOM 节点把界面卡死
+    const MAX_DIR_ENTRIES = 800;
+    const shownEntries = res.entries.slice(0, MAX_DIR_ENTRIES);
+    for (const entry of shownEntries) {
       const li = document.createElement('li');
       const rel = relPath ? `${relPath}\\${entry.name}` : entry.name;
       const item = document.createElement('div');
@@ -734,6 +753,13 @@
         });
       }
       container.appendChild(li);
+    }
+
+    if (res.entries.length > MAX_DIR_ENTRIES) {
+      const more = document.createElement('li');
+      more.className = 'explorer-hint';
+      more.textContent = `目录项过多，仅显示前 ${MAX_DIR_ENTRIES} 项（共 ${res.entries.length} 项）`;
+      container.appendChild(more);
     }
   }
 
@@ -793,14 +819,17 @@
     return /\.(md|markdown)$/i.test(relPath);
   }
 
-  // 渲染 Markdown：去掉 script / on* 事件属性，防注入
+  // 渲染 Markdown：交给 DOMPurify 做白名单清洗，避免 javascript: 链接 / 事件属性等注入
   function renderMarkdown(content) {
     try {
       const raw = marked.parse(content, { breaks: true, gfm: true });
-      const clean = raw
-        .replace(/<script[\s\S]*?<\/script>/gi, '')
-        .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
-        .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*')/gi, '');
+      const clean = window.DOMPurify
+        ? window.DOMPurify.sanitize(raw, {
+            FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'meta', 'link', 'base', 'object', 'embed'],
+            FORBID_ATTR: ['style', 'srcdoc'],
+            ALLOW_DATA_ATTR: false
+          })
+        : escapeHtml(raw);
       els.viewerBody.innerHTML = `<div class="md-body">${clean}</div>`;
     } catch (err) {
       // 解析失败退回纯文本
@@ -907,6 +936,14 @@
       html += `<div class="git-project-header">${escapeHtml(projName)}</div>`;
 
       for (const s of sessList) {
+        if (s.worktreeCleaned) {
+          html += `
+            <div class="git-item">
+              <div class="git-item-head"><span class="git-name">⎇ ${escapeHtml(s.agent.label)}</span></div>
+              <div class="git-sub">工作树已清理</div>
+            </div>`;
+          continue;
+        }
         const st = await window.api.gitStatus({ projectPath: projPath, wtPath: s.worktreePath });
         if (!st.success) {
           html += `
@@ -922,6 +959,14 @@
             <span>${escapeHtml(d.file)}</span>
           </div>`).join('');
         const moreCount = Math.max(0, (st.dirty || []).length - 15);
+        let cleanupAction;
+        if (s.worktreeCleaned) {
+          cleanupAction = '<span class="git-cleaned">工作树已清理</span>';
+        } else if (s.exited) {
+          cleanupAction = `<button class="btn btn-secondary btn-mini git-cleanup" data-session="${s.sessionId}">清理工作树</button>`;
+        } else {
+          cleanupAction = '<span class="git-cleaned">会话运行中，退出后可清理</span>';
+        }
         html += `
           <div class="git-item">
             <div class="git-item-head">
@@ -934,11 +979,37 @@
               ${st.lastCommit ? `<br>最近提交：${escapeHtml(st.lastCommit)}` : ''}
             </div>
             ${dirtyFiles ? `<div class="git-files">${dirtyFiles}${moreCount ? `<div class="git-file"><span>…</span><span>还有 ${moreCount} 个文件</span></div>` : ''}</div>` : ''}
+            <div class="git-actions">${cleanupAction}</div>
           </div>`;
       }
     }
 
     body.innerHTML = html;
+
+    // 清理工作树：有未提交改动时主进程会拒绝，不会误删
+    body.querySelectorAll('.git-cleanup').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const s = sessions.get(btn.dataset.session);
+        if (!s || !s.worktreePath) return;
+        const ok = confirm(`确定清理「${s.agent.label}」的 worktree？\n\n${s.worktreePath}\n\n有未提交改动时会自动取消。`);
+        if (!ok) return;
+        btn.disabled = true;
+        btn.textContent = '清理中…';
+        const res = await window.api.cleanupWorktree({ projectPath: s.projectPath, wtPath: s.worktreePath });
+        if (!res.success) {
+          alert(`清理失败：${res.error}`);
+          btn.disabled = false;
+          btn.textContent = '清理工作树';
+          return;
+        }
+        s.worktreeCleaned = true;
+        if (expSelection === s.sessionId) {
+          expSelection = 'proj';
+          syncExplorerRoot();
+        }
+        renderGitStatus();
+      });
+    });
   }
 
   // ---------- 布局持久化 ----------
@@ -1057,6 +1128,17 @@
   });
   els.btnViewerClose.addEventListener('click', closeViewer);
   els.btnViewerDiff.addEventListener('click', toggleDiffView);
+
+  // Markdown 里的链接交给系统浏览器打开，绝不让窗口自己导航走
+  els.viewerBody.addEventListener('click', e => {
+    const link = e.target.closest('a[href]');
+    if (!link) return;
+    e.preventDefault();
+    const href = link.getAttribute('href') || '';
+    if (/^(https?:\/\/|mailto:)/i.test(href)) {
+      window.api.openExternal(href);
+    }
+  });
 
   // Git 状态浮窗
   els.btnGitStatus.addEventListener('click', toggleGitPopover);
