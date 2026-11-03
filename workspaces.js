@@ -79,22 +79,62 @@ function ensureDefault(reg, projectPath) {
  * 与 git 真实状态对账：managed 目录消失 → status: 'missing'。
  * external / default 即使目录消失也只读引用，不改 status（用户自己负责）。
  */
+/** 目录里除了 .git 和 scratch 什么都没有（空壳工作区的判定条件之一） */
+function isEmptyWorktreeDir(dir) {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .every(e => e.name === '.git' || e.name === SCRATCH_DIR_NAME);
+  } catch {
+    return false;
+  }
+}
+
 async function reconcile(records, projectPath) {
   const gitTrees = await worktree.listWorktrees(projectPath);
-  const gitPaths = new Set(gitTrees.map(t => normPath(t.worktree).toLowerCase()));
-  const branchByPath = new Map(gitTrees.map(t => [normPath(t.worktree).toLowerCase(), t.branch || '']));
+  const byPath = new Map(gitTrees.map(t => [normPath(t.worktree).toLowerCase(), t]));
 
   let dirty = false;
+  const survivors = [];
+
   for (const r of records) {
     const np = normPath(r.worktreePath).toLowerCase();
-    const onDisk = gitPaths.has(np) || fs.existsSync(r.worktreePath);
+    const tree = byPath.get(np);
+    const onDisk = Boolean(tree) || fs.existsSync(r.worktreePath);
+
+    // 空壳工作区：git 记录里有分支名，但分支 ref 实际不存在（通常是早期失败留下的）
+    if (r.kind === 'managed' && tree && tree.branch && !(await worktree.branchExists(projectPath, tree.branch))) {
+      if (fs.existsSync(r.worktreePath) && isEmptyWorktreeDir(r.worktreePath)) {
+        try {
+          await worktree.removeWorktree(projectPath, r.worktreePath, true);
+          dirty = true;
+          continue; // 连同注册表记录一起丢弃
+        } catch {
+          // 删不掉就留在列表里，交给用户手动处理
+        }
+      }
+      if (r.status !== 'broken') { r.status = 'broken'; dirty = true; }
+      survivors.push(r);
+      continue;
+    }
+
     if (r.kind === 'managed') {
       const missing = !onDisk;
       if (missing && r.status !== 'missing') { r.status = 'missing'; dirty = true; }
       if (!missing && r.status === 'missing') { delete r.status; dirty = true; }
     }
-    if (branchByPath.has(np)) r.branch = branchByPath.get(np);
+
+    // 已有状态恢复后，分支名以 git 为准（porcelain 会带 refs/heads 前缀，listWorktrees 已剥掉）
+    if (tree) r.branch = tree.branch || r.branch;
+
+    survivors.push(r);
   }
+
+  if (survivors.length !== records.length) {
+    records.length = 0;
+    records.push(...survivors);
+    dirty = true;
+  }
+
   return dirty;
 }
 
@@ -111,6 +151,13 @@ async function migrateExisting(projectPath, cfg = {}) {
 
   const gitTrees = await worktree.listWorktrees(projectPath);
   let dirty = false;
+  // 迁移时把 base 分支记下来，否则后续 diff/合并会因为 baseBranch 为空直接判成"没有改动"
+  let currentBase = '';
+  try {
+    currentBase = await worktree.currentBranch(projectPath);
+  } catch {
+    currentBase = '';
+  }
 
   for (const t of gitTrees) {
     const np = normPath(t.worktree);
@@ -124,8 +171,8 @@ async function migrateExisting(projectPath, cfg = {}) {
       name: path.basename(t.worktree),
       worktreePath: np,
       branch: (t.branch || '').replace(/^refs\/heads\//, ''),
-      baseBranch: null,
-      baseRef: 'HEAD',
+      baseBranch: currentBase || null,
+      baseRef: currentBase || 'HEAD',
       createdAt: new Date().toISOString(),
       renamed: false
     });
@@ -156,6 +203,17 @@ async function list(projectPath) {
 async function byId(projectPath, id) {
   const all = await list(projectPath);
   return all.find(w => w.id === id) || null;
+}
+
+/** 复用工作区启动时刷新"上次使用时间"，供启动弹层排序/展示 */
+function touch(projectPath, id) {
+  const reg = load();
+  const records = reg.projects[projectKey(projectPath)] || [];
+  const rec = records.find(w => w.id === id);
+  if (!rec) return false;
+  rec.lastUsedAt = new Date().toISOString();
+  save(reg);
+  return true;
 }
 
 function byIdSync(reg, projectPath, id) {
@@ -237,6 +295,7 @@ async function createManaged(projectPath, agentCommand, cfg = {}, name) {
     baseRef: baseBranch || 'HEAD',
     agentCommand,
     createdAt: new Date().toISOString(),
+    lastUsedAt: new Date().toISOString(),
     renamed: Boolean(name && name.trim())
   };
 
@@ -370,6 +429,7 @@ module.exports = {
   SCRATCH_DIR_NAME,
   list,
   byId,
+  touch,
   createManaged,
   attachExternal,
   renameWorkspace,

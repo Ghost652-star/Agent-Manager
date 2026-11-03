@@ -99,11 +99,11 @@
         <span class="agent-name">${escapeHtml(agent.label)}</span>
         <span class="agent-cmd">${escapeHtml(agent.command)}</span>
       `;
-      li.addEventListener('click', () => launchAgent(agent));
+      li.addEventListener('click', () => openAgentMenu(agent, li));
       li.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          launchAgent(agent);
+          openAgentMenu(agent, li);
         }
       });
       els.agentList.appendChild(li);
@@ -218,7 +218,175 @@
     return `${drive}:\\agent-worktrees\\${path.replace(/\\/g, '/').split('/').pop()}`;
   }
 
-  async function launchAgent(agent) {
+  // ---------- 启动时选择工作区（M6） ----------
+
+  function sanitizeCmd(cmd) {
+    return String(cmd || '').replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+  }
+
+  function relativeTime(iso) {
+    if (!iso) return '';
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return '';
+    const min = Math.floor(ms / 60000);
+    if (min < 1) return '刚刚';
+    if (min < 60) return `${min} 分钟前`;
+    const hours = Math.floor(min / 60);
+    if (hours < 24) return `${hours} 小时前`;
+    return `${Math.floor(hours / 24)} 天前`;
+  }
+
+  // 可复用的工作区：同 agent、目录健康、且没有被运行中的会话占用
+  function reusableWorkspaces(agent) {
+    const safe = sanitizeCmd(agent.command);
+    const exact = new RegExp(`^agent/${safe}(-\\d+)?$`);
+    return workspaceCache.filter(w => {
+      if (w.kind !== 'managed') return false;
+      if (w.status === 'missing' || w.status === 'broken') return false;
+      if (w.running) return false;
+      // 新记录直接看 agentCommand；老记录回退到分支命名规则
+      if (w.agentCommand) return w.agentCommand === safe;
+      return exact.test(w.branch || '');
+    }).sort((a, b) => {
+      const ta = new Date(a.lastUsedAt || a.createdAt || 0).getTime();
+      const tb = new Date(b.lastUsedAt || b.createdAt || 0).getTime();
+      return tb - ta; // 最近用过的排前面
+    });
+  }
+
+  let agentMenuEl = null;
+
+  function closeAgentMenu() {
+    if (agentMenuEl) {
+      agentMenuEl.remove();
+      agentMenuEl = null;
+    }
+    document.removeEventListener('mousedown', onAgentMenuOutside, true);
+    document.removeEventListener('keydown', onAgentMenuKey, true);
+  }
+
+  function onAgentMenuOutside(e) {
+    if (agentMenuEl && !agentMenuEl.contains(e.target)) closeAgentMenu();
+  }
+
+  function onAgentMenuKey(e) {
+    if (e.key === 'Escape') closeAgentMenu();
+  }
+
+  async function openAgentMenu(agent, anchorEl) {
+    closeAgentMenu();
+    if (!projectPath) {
+      launchAgent(agent); // 交给 launchAgent 提示"请先打开项目"
+      return;
+    }
+
+    await populateRootSelect(); // 刷新工作区缓存，拿到最新 running / 状态
+    const reuse = reusableWorkspaces(agent);
+
+    // 没有可复用的 → 直接新建，保持原来的手感
+    if (reuse.length === 0) {
+      launchAgent(agent);
+      return;
+    }
+
+    const menu = document.createElement('div');
+    menu.className = 'agent-menu';
+    menu.setAttribute('role', 'menu');
+
+    const createBtn = document.createElement('button');
+    createBtn.type = 'button';
+    createBtn.className = 'agent-menu-item is-primary';
+    createBtn.setAttribute('role', 'menuitem');
+    createBtn.innerHTML = `
+      <span class="ami-icon">＋</span>
+      <span class="ami-body">
+        <span class="ami-name">新建工作区</span>
+        <span class="ami-sub">全新分支，干净开始</span>
+      </span>`;
+    createBtn.addEventListener('click', () => {
+      closeAgentMenu();
+      launchAgent(agent);
+    });
+    menu.appendChild(createBtn);
+
+    const sep = document.createElement('div');
+    sep.className = 'agent-menu-sep';
+    menu.appendChild(sep);
+
+    const hint = document.createElement('div');
+    hint.className = 'agent-menu-hint';
+    hint.textContent = '复用已有工作区';
+    menu.appendChild(hint);
+
+    for (const w of reuse) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'agent-menu-item';
+      btn.setAttribute('role', 'menuitem');
+      const used = relativeTime(w.lastUsedAt || w.createdAt);
+      btn.innerHTML = `
+        <span class="ami-icon">↻</span>
+        <span class="ami-body">
+          <span class="ami-name">${escapeHtml(w.name)}</span>
+          <span class="ami-sub">${escapeHtml(w.branch || '')}${used ? ` · ${escapeHtml(used)}` : ''}</span>
+        </span>
+        <span class="ami-dirty" data-ws="${escapeHtml(w.id)}">…</span>`;
+      btn.addEventListener('click', () => {
+        closeAgentMenu();
+        launchAgent(agent, w.id);
+      });
+      menu.appendChild(btn);
+    }
+
+    document.body.appendChild(menu);
+
+    // 贴着 agent 项下方展开，超出视口就修正
+    const r = anchorEl.getBoundingClientRect();
+    const mw = menu.offsetWidth;
+    const mh = menu.offsetHeight;
+    let left = r.left;
+    let top = r.bottom + 6;
+    if (left + mw > window.innerWidth - 8) left = Math.max(8, window.innerWidth - mw - 8);
+    if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 6);
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    agentMenuEl = menu;
+
+    document.addEventListener('mousedown', onAgentMenuOutside, true);
+    document.addEventListener('keydown', onAgentMenuKey, true);
+
+    // 异步补上每个工作区的未提交改动数
+    for (const w of reuse) {
+      window.api.gitStatus({ projectPath, wtPath: w.worktreePath }).then(st => {
+        const el = menu.querySelector(`.ami-dirty[data-ws="${w.id}"]`);
+        if (!el) return;
+        if (!st || !st.success) { el.textContent = ''; return; }
+        const n = (st.dirty || []).length;
+        el.textContent = n ? `${n} 个改动` : '干净';
+        el.classList.toggle('is-clean', n === 0);
+      }).catch(() => {});
+    }
+  }
+
+  // ---------- 轻量提示条 ----------
+
+  let toastTimer = null;
+
+  function toast(message, kind = 'ok') {
+    let el = document.getElementById('toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'toast';
+      document.body.appendChild(el);
+    }
+    el.textContent = message;
+    el.className = `toast is-${kind} is-visible`;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('is-visible'), 4000);
+  }
+
+  // workspaceId 有值时复用既有工作区，否则后端新建一个 managed 工作区
+  async function launchAgent(agent, workspaceId) {
     if (!projectPath) {
       alert('请先打开一个项目目录');
       return;
@@ -249,7 +417,7 @@
     switchTab(sessionId);
 
     try {
-      const result = await window.api.launchAgent({ projectPath, agentCommand: agent.command, sessionId });
+      const result = await window.api.launchAgent({ projectPath, agentCommand: agent.command, sessionId, workspaceId });
       if (!result.success) {
         content.innerHTML = `<div class="tab-error">启动失败：${escapeHtml(result.error)}</div>`;
         return;
@@ -1209,16 +1377,39 @@
           return;
         }
 
-        // T4.5：合并成功后提示保留 / 归档
-        const archive = confirm('合并成功！是否归档此工作区？\n\n（归档会删除工作区目录，保留分支）');
-        if (archive && s) {
-          try {
-            await window.api.archiveWorkspace({ projectPath, id: wsId });
-            s.worktreeCleaned = true;
+        // T6.5：合并成功后，工作树干净就自动归档（只删目录，分支保留可回溯）
+        const wsRec = workspaceCache.find(w => w.id === wsId);
+        const branchName = (wsRec && wsRec.branch) || '';
+        const st = await window.api.gitStatus({ projectPath, wtPath: s && s.worktreePath });
+        const dirtyCount = st && st.success ? (st.dirty || []).length : -1;
+
+        if (dirtyCount === 0) {
+          const res2 = await window.api.archiveWorkspace({ projectPath, id: wsId });
+          if (res2.success) {
+            if (s) s.worktreeCleaned = true;
+            // 工作区已归档：关联的"已退出"会话也没意义了，顺手清掉，避免点开报"目录丢失"
+            for (const [sid, sess] of [...sessions.entries()]) {
+              if (sess.workspaceId !== wsId || !sess.exited) continue;
+              sess.tabEl.remove();
+              sess.contentEl.remove();
+              sessions.delete(sid);
+              window.api.forgetSession({ sessionId: sid }).catch(() => {});
+            }
+            if (sessions.size === 0) {
+              els.terminalArea.classList.add('hidden');
+              els.emptyState.classList.remove('hidden');
+            }
             const def = workspaceCache.find(w => w.kind === 'default');
             if (def) expSelection = def.id;
-            syncExplorerRoot();
-          } catch { /* 归档失败不影响合并结果 */ }
+            await syncExplorerRoot();
+            toast(`已合并并清理工作目录${branchName ? `（分支 ${branchName} 保留）` : ''}`);
+          } else {
+            toast(`合并成功，但清理失败：${res2.error || '未知原因'}`, 'warn');
+          }
+        } else if (dirtyCount > 0) {
+          toast(`合并成功；工作目录还有 ${dirtyCount} 个未提交改动，已保留`, 'warn');
+        } else {
+          toast('合并成功；未能确认工作目录状态，已保留', 'warn');
         }
         renderGitStatus();
       });

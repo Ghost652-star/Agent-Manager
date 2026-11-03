@@ -330,7 +330,16 @@ ipcMain.handle('session:check', async (e, { projectPath, sessionId }) => {
 
 ipcMain.handle('workspace:list', async (e, { projectPath }) => {
   try {
-    return { success: true, workspaces: await workspaces.list(projectPath) };
+    const list = await workspaces.list(projectPath);
+    // 标记是否被运行中的会话占用：占用中的工作区不参与"复用"选择，避免两个终端写同一目录
+    const busy = new Set();
+    for (const s of sessions.values()) {
+      if (s.workspaceId && !s.exited) busy.add(s.workspaceId);
+    }
+    return {
+      success: true,
+      workspaces: list.map(w => ({ ...w, running: busy.has(w.id) }))
+    };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -372,12 +381,25 @@ ipcMain.handle('workspace:archive', async (e, { projectPath, id }) => {
 // ---------- 审查闭环（M4） ----------
 
 // 查看 worktree 相对 base 的 diff 统计
+// 迁移登记的工作区可能没有 baseBranch：回退到项目当前分支（通常是 main）
+async function resolveBaseBranch(projectPath, ws) {
+  if (ws && ws.baseBranch) return ws.baseBranch;
+  try {
+    const cur = await worktree.currentBranch(projectPath);
+    return cur || '';
+  } catch {
+    return '';
+  }
+}
+
 ipcMain.handle('review:diffstat', async (e, { projectPath, workspaceId }) => {
   try {
     const ws = await workspaces.byId(projectPath, workspaceId);
     if (!ws) throw new Error('工作区不存在');
-    const stats = await worktree.diffStats(projectPath, ws.worktreePath, ws.baseBranch || 'HEAD');
-    return { success: true, ...stats };
+    const base = await resolveBaseBranch(projectPath, ws);
+    if (!base) throw new Error('无法确定 base 分支');
+    const stats = await worktree.diffStats(projectPath, ws.worktreePath, base);
+    return { success: true, baseBranch: base, ...stats };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -388,7 +410,9 @@ ipcMain.handle('review:merge', async (e, { projectPath, workspaceId }) => {
   try {
     const ws = await workspaces.byId(projectPath, workspaceId);
     if (!ws) throw new Error('工作区不存在');
-    const result = await worktree.mergeToBase(projectPath, ws.worktreePath, ws.branch, ws.baseBranch);
+    const base = await resolveBaseBranch(projectPath, ws);
+    if (!base) throw new Error('无法确定 base 分支');
+    const result = await worktree.mergeToBase(projectPath, ws.worktreePath, ws.branch, base);
     return { success: true, ...result };
   } catch (err) {
     return { success: false, error: err.message };
@@ -455,12 +479,20 @@ ipcMain.handle('agent:launch', async (e, { projectPath, agentCommand, sessionId,
 
     const cfg = config.read();
 
-    // 优先复用指定工作区（M2 会话恢复），否则新建 managed 工作区
+    // 优先复用指定工作区（M2 会话恢复 / M6 手动复用），否则新建 managed 工作区
     let ws;
     if (workspaceId) {
       ws = await workspaces.byId(projectPath, workspaceId);
       if (!ws) throw new Error('指定的工作区不存在');
       if (ws.status === 'missing') throw new Error('工作区目录已丢失，无法启动');
+      if (ws.status === 'broken') throw new Error('工作区已损坏（分支不存在），请先清理后重试');
+      // 同一个工作区不允许两个终端同时写
+      for (const s of sessions.values()) {
+        if (s.workspaceId === workspaceId && !s.exited) {
+          throw new Error('该工作区已被另一个运行中的会话占用');
+        }
+      }
+      workspaces.touch(projectPath, workspaceId);
     } else {
       ws = await workspaces.createManaged(projectPath, agentCommand, cfg);
     }
