@@ -1,6 +1,6 @@
 {
   "name": "agent-manager",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "在隔离的 Git Worktree 中管理并启动多个 CLI Agent",
   "main": "main.js",
   "scripts": {
@@ -15,15 +15,9 @@
       "output": "dist"
     },
     "files": [
-      "main.js",
-      "preload.js",
+      "*.js",
       "index.html",
-      "renderer.js",
       "styles.css",
-      "worktree.js",
-      "git.js",
-      "agents.js",
-      "config.js",
       "node_modules/**/*",
       "!node_modules/node-pty/prebuilds/win32-arm64/**",
       "!node_modules/node-pty/prebuilds/darwin-*/**",
@@ -32,6 +26,7 @@
       "!node_modules/node-pty/src/**"
     ],
     "win": {
+      "artifactName": "AgentManager-Green-${version}.${ext}",
       "target": [
         {
           "target": "nsis",
@@ -40,7 +35,7 @@
           ]
         },
         {
-          "target": "portable",
+          "target": "zip",
           "arch": [
             "x64"
           ]
@@ -49,13 +44,11 @@
       "signAndEditExecutable": false
     },
     "nsis": {
+      "artifactName": "Agent Manager Setup ${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
-    },
-    "portable": {
-      "artifactName": "AgentManager-Portable-${version}.exe"
     },
     "npmRebuild": false,
     "nodeGypRebuild": false

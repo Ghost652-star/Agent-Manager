@@ -15,6 +15,29 @@ const config = require('./config');
 const sessions = new Map();
 let mainWindow;
 
+// 把 Electron 自身的 userData / 缓存 / 日志 / 崩溃转储 全部重定向到软件目录下的 data，
+// 避免写入 C 盘 %APPDATA% / %LOCALAPPDATA%。必须在 app ready 之前执行。
+(function redirectUserData() {
+  if (!app.isPackaged) return; // 开发环境保持默认，方便调试
+  const base = process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(app.getPath('exe'));
+  const root = path.join(base, 'data');
+  const targets = {
+    userData: path.join(root, 'userdata'),
+    sessionData: path.join(root, 'userdata'),
+    logs: path.join(root, 'logs'),
+    crashDumps: path.join(root, 'crashes'),
+    temp: path.join(root, 'tmp')
+  };
+  for (const [key, dir] of Object.entries(targets)) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      app.setPath(key, dir);
+    } catch {
+      // 目录不可写时退回 Electron 默认路径，不阻断启动
+    }
+  }
+})();
+
 // Windows 上杀掉 PowerShell 本身不会带走它启动的 agent 子进程，
 // 用 taskkill /T 结束整棵进程树，避免后台残留 node/claude 进程。
 function killSessionProcess(session) {

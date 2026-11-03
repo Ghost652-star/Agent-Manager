@@ -41,14 +41,18 @@ npm start
 ## 构建打包
 
 ```bash
-# 打包（自动清理旧版本产物，生成 NSIS 安装版 + 便携版到 dist/）
+# 打包（自动清理旧版本产物，生成 NSIS 安装版 + 绿色版 zip 到 dist/）
 npm run build
 ```
 
 产物：
 
-- `dist/Agent Manager Setup <版本>.exe` —— NSIS 安装程序
-- `dist/AgentManager-Portable-<版本>.exe` —— 便携版，双击即用
+- `dist/Agent Manager Setup <版本>.exe` —— NSIS 安装程序（安装时可自定义目录，建议装到非 C 盘）
+- `dist/AgentManager-Green-<版本>.zip` —— 绿色版，解压到任意目录（如 `F:\AgentManager`）双击 `Agent Manager.exe` 运行
+
+> **为什么不再提供单文件便携 exe**：electron-builder 的 portable 目标运行时会把自身解压到
+> `C:\Users\<用户>\AppData\Local\Temp`，与"不碰 C 盘"的约定冲突。绿色版解压后直接在原地运行，
+> Electron 的 userData / 缓存 / 日志 / 临时目录也已全部重定向到软件目录下的 `data/`。
 
 ## 使用方法
 
@@ -61,7 +65,7 @@ npm run build
 
 ## 配置存储
 
-所有配置数据存放在软件本地的 `data/` 目录（与 exe 同级），**不写** C 盘用户目录和注册表；便携版配置跟随 exe 所在目录，方便整体搬运。
+所有配置数据存放在软件本地的 `data/` 目录（与 exe 同级），**不写** C 盘用户目录和注册表：配置、工作区/会话记录、Electron 的 userData、缓存、日志、崩溃转储、临时文件全部落在 `data/` 下，整个软件目录可以直接搬走。
 
 ## 项目结构
 
