@@ -20,6 +20,29 @@ async function gitExists(projectPath) {
   }
 }
 
+// 仓库是否存在任何提交。空仓库（git init 后没 commit）会让
+// `worktree add -b <branch> --no-track` 与 git 推断的 --orphan 冲突。
+async function hasCommits(projectPath) {
+  try {
+    await run(projectPath, 'git', ['rev-parse', '--verify', 'HEAD']);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// 没有提交时补一次初始提交：既解决 orphan 冲突，也让 worktree 里有项目文件。
+async function ensureInitialCommit(projectPath) {
+  if (await hasCommits(projectPath)) return false;
+  await run(projectPath, 'git', ['add', '-A']);
+  await run(projectPath, 'git', [
+    '-c', 'user.email=agent-manager@local',
+    '-c', 'user.name=Agent Manager',
+    'commit', '--allow-empty', '-m', 'init: Agent Manager 自动初始化'
+  ]);
+  return true;
+}
+
 async function initGit(projectPath) {
   await run(projectPath, 'git', ['init']);
   try {
@@ -27,15 +50,7 @@ async function initGit(projectPath) {
   } catch {
     // 可能已经存在 main 分支
   }
-  // 必须造一次初始提交：空仓库下 `worktree add -b ... --no-track`
-  // 会和 git 推断的 --orphan 冲突（options '--orphan' and '--track' cannot be used together）。
-  // 同时这保证新文件夹里已有的文件会出现在每个 worktree 里。
-  await run(projectPath, 'git', ['add', '-A']);
-  await run(projectPath, 'git', [
-    '-c', 'user.email=agent-manager@local',
-    '-c', 'user.name=Agent Manager',
-    'commit', '--allow-empty', '-m', 'init: Agent Manager 自动初始化'
-  ]);
+  await ensureInitialCommit(projectPath);
 }
 
 function sanitize(name) {
@@ -268,5 +283,7 @@ module.exports = {
   discardAllChanges,
   countDirty,
   gitExists,
-  initGit
+  initGit,
+  hasCommits,
+  ensureInitialCommit
 };

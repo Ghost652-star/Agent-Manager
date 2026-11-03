@@ -184,9 +184,13 @@ async function createManaged(projectPath, agentCommand, cfg = {}, name) {
   const key = projectKey(projectPath);
   const records = ensureDefault(reg, projectPath);
 
-  // 非 git 目录自动 init（与旧版 ensure() 行为保持一致，否则新建文件夹起不动 agent）
+  // 非 git 目录自动 init；已是 git 仓库但没有任何提交时补一次初始提交。
+  // 两种情况都必须保证仓库里至少有一个 commit，否则 worktree add --no-track
+  // 会和 git 推断的 --orphan 冲突（options '--orphan' and '--track' cannot be used together）。
   if (!(await worktree.gitExists(projectPath))) {
     await worktree.initGit(projectPath);
+  } else {
+    await worktree.ensureInitialCommit(projectPath);
   }
 
   const safe = worktree.sanitize(agentCommand);
