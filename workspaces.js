@@ -184,6 +184,11 @@ async function createManaged(projectPath, agentCommand, cfg = {}, name) {
   const key = projectKey(projectPath);
   const records = ensureDefault(reg, projectPath);
 
+  // 非 git 目录自动 init（与旧版 ensure() 行为保持一致，否则新建文件夹起不动 agent）
+  if (!(await worktree.gitExists(projectPath))) {
+    await worktree.initGit(projectPath);
+  }
+
   const safe = worktree.sanitize(agentCommand);
   const root = worktree.worktreeRootFor(projectPath, cfg);
   if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });

@@ -27,6 +27,15 @@ async function initGit(projectPath) {
   } catch {
     // 可能已经存在 main 分支
   }
+  // 必须造一次初始提交：空仓库下 `worktree add -b ... --no-track`
+  // 会和 git 推断的 --orphan 冲突（options '--orphan' and '--track' cannot be used together）。
+  // 同时这保证新文件夹里已有的文件会出现在每个 worktree 里。
+  await run(projectPath, 'git', ['add', '-A']);
+  await run(projectPath, 'git', [
+    '-c', 'user.email=agent-manager@local',
+    '-c', 'user.name=Agent Manager',
+    'commit', '--allow-empty', '-m', 'init: Agent Manager 自动初始化'
+  ]);
 }
 
 function sanitize(name) {
@@ -257,5 +266,7 @@ module.exports = {
   diffStats,
   mergeToBase,
   discardAllChanges,
-  countDirty
+  countDirty,
+  gitExists,
+  initGit
 };
