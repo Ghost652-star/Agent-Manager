@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // 工作区（default / managed / external）
   listWorkspaces: params => ipcRenderer.invoke('workspace:list', params),
+  listAllWorkspaces: params => ipcRenderer.invoke('workspace:list-all', params),
   createWorkspace: params => ipcRenderer.invoke('workspace:create', params),
   attachWorkspace: params => ipcRenderer.invoke('workspace:attach', params),
   renameWorkspace: params => ipcRenderer.invoke('workspace:rename', params),

@@ -288,7 +288,8 @@ async function createManaged(projectPath, agentCommand, cfg = {}, name) {
   const record = {
     id: newId(),
     kind: 'managed',
-    name: name && name.trim() ? name.trim() : safe,
+    // 默认用目录名（claude-2 / claude-3）而不是 agent 命令，否则多开时列表里全是同名的 claude
+    name: name && name.trim() ? name.trim() : path.basename(wtPath),
     worktreePath: normPath(wtPath),
     branch,
     baseBranch: baseBranch || null,

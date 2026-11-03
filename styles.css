@@ -1954,8 +1954,8 @@ body.dragging .file-tree {
 .agent-menu {
   position: fixed;
   z-index: 60;
-  min-width: 260px;
-  max-width: 320px;
+  min-width: 290px;
+  max-width: 360px;
   padding: var(--space-2);
   background: var(--panel);
   border: 1px solid var(--border-strong);
@@ -2061,8 +2061,25 @@ body.dragging .file-tree {
   background: var(--border);
 }
 
+.agent-menu-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 4px 10px 6px;
+}
+
+.agent-menu-proj {
+  font: 9.5px var(--font-mono);
+  color: var(--text-muted);
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-menu-hint {
-  padding: 2px 10px 4px;
+  padding: 0;
   font: 9px var(--font-mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2100,4 +2117,40 @@ body.dragging .file-tree {
 .toast.is-warn {
   border-color: rgba(240, 82, 82, 0.42);
   border-left-color: var(--danger);
+}
+
+/* 复用弹层里的项目分组标题 */
+.agent-menu-group {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 6px 10px 2px;
+}
+
+.amg-name {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  flex: 0 0 auto;
+}
+
+.amg-cur {
+  margin-left: 6px;
+  padding: 0 4px;
+  font: 8.5px var(--font-mono);
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
+  border-radius: 3px;
+}
+
+.amg-path {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font: 9px var(--font-mono);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

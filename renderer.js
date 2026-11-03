@@ -224,34 +224,25 @@
     return String(cmd || '').replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
   }
 
-  function relativeTime(iso) {
+  // 绝对时间更适合"上次用的是哪一次"：今天 19:41 / 昨天 09:12 / 10-31 14:05
+  function formatLastUsed(iso) {
     if (!iso) return '';
-    const ms = Date.now() - new Date(iso).getTime();
-    if (!Number.isFinite(ms) || ms < 0) return '';
-    const min = Math.floor(ms / 60000);
-    if (min < 1) return '刚刚';
-    if (min < 60) return `${min} 分钟前`;
-    const hours = Math.floor(min / 60);
-    if (hours < 24) return `${hours} 小时前`;
-    return `${Math.floor(hours / 24)} 天前`;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const now = new Date();
+    const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    if (d.toDateString() === now.toDateString()) return `今天 ${hm}`;
+    const y = new Date(now);
+    y.setDate(now.getDate() - 1);
+    if (d.toDateString() === y.toDateString()) return `昨天 ${hm}`;
+    return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${hm}`;
   }
 
-  // 可复用的工作区：同 agent、目录健康、且没有被运行中的会话占用
-  function reusableWorkspaces(agent) {
-    const safe = sanitizeCmd(agent.command);
-    const exact = new RegExp(`^agent/${safe}(-\\d+)?$`);
-    return workspaceCache.filter(w => {
-      if (w.kind !== 'managed') return false;
-      if (w.status === 'missing' || w.status === 'broken') return false;
-      if (w.running) return false;
-      // 新记录直接看 agentCommand；老记录回退到分支命名规则
-      if (w.agentCommand) return w.agentCommand === safe;
-      return exact.test(w.branch || '');
-    }).sort((a, b) => {
-      const ta = new Date(a.lastUsedAt || a.createdAt || 0).getTime();
-      const tb = new Date(b.lastUsedAt || b.createdAt || 0).getTime();
-      return tb - ta; // 最近用过的排前面
-    });
+  // 工作区显示名：改过名用名字，否则用目录名（claude-2 / claude-3），避免多开时全是 claude
+  function workspaceLabel(w) {
+    if (w.renamed && w.name) return w.name;
+    const parts = String(w.worktreePath || '').replace(/\\/g, '/').split('/').filter(Boolean);
+    return parts[parts.length - 1] || w.name || '';
   }
 
   let agentMenuEl = null;
@@ -273,6 +264,68 @@
     if (e.key === 'Escape') closeAgentMenu();
   }
 
+  // 从某个项目的工作区列表里筛出"这个 agent 可复用"的项
+  function reusableFrom(list, agent) {
+    const safe = sanitizeCmd(agent.command);
+    const exact = new RegExp('^agent/' + safe + '(-\\d+)?$');
+    return list.filter(w => {
+      if (w.kind !== 'managed') return false;
+      if (w.status === 'missing' || w.status === 'broken') return false;
+      if (w.running) return false;
+      if (w.agentCommand) return w.agentCommand === safe;
+      return exact.test(w.branch || '');
+    }).sort((a, b) => {
+      const ta = new Date(a.lastUsedAt || a.createdAt || 0).getTime();
+      const tb = new Date(b.lastUsedAt || b.createdAt || 0).getTime();
+      return tb - ta;
+    });
+  }
+
+  function makeReuseItem(agent, w, projPath, menu) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'agent-menu-item';
+    btn.setAttribute('role', 'menuitem');
+    const label = workspaceLabel(w);
+    const when = w.lastUsedAt
+      ? `上次使用 ${formatLastUsed(w.lastUsedAt)}`
+      : `创建于 ${formatLastUsed(w.createdAt)}`;
+    btn.title = `${w.worktreePath}\n项目：${projPath}\n分支：${w.branch || '—'}\n${when}`;
+    btn.innerHTML = `
+      <span class="ami-icon">↻</span>
+      <span class="ami-body">
+        <span class="ami-name">${escapeHtml(label)}</span>
+        <span class="ami-sub">${escapeHtml(w.branch || '')} · ${escapeHtml(when)}</span>
+      </span>
+      <span class="ami-dirty" data-ws="${escapeHtml(w.id)}">…</span>`;
+
+    btn.addEventListener('click', async () => {
+      closeAgentMenu();
+      const sameProject = (projPath || '').toLowerCase() === (projectPath || '').toLowerCase();
+      if (!sameProject) {
+        const ok = confirm(
+          `「${label}」属于另一个项目：\n${projPath}\n\n是否切换到该项目并启动？`
+        );
+        if (!ok) return;
+        const okSwitch = await setProject(projPath, true);
+        if (!okSwitch) return;
+      }
+      launchAgent(agent, w.id);
+    });
+
+    // 异步补未提交改动数
+    window.api.gitStatus({ projectPath: projPath, wtPath: w.worktreePath }).then(st => {
+      const el = btn.querySelector('.ami-dirty');
+      if (!el) return;
+      if (!st || !st.success) { el.textContent = ''; return; }
+      const n = (st.dirty || []).length;
+      el.textContent = n ? `${n} 个改动` : '干净';
+      el.classList.toggle('is-clean', n === 0);
+    }).catch(() => {});
+
+    menu.appendChild(btn);
+  }
+
   async function openAgentMenu(agent, anchorEl) {
     closeAgentMenu();
     if (!projectPath) {
@@ -280,12 +333,34 @@
       return;
     }
 
-    await populateRootSelect(); // 刷新工作区缓存，拿到最新 running / 状态
-    const reuse = reusableWorkspaces(agent);
+    // 当前项目 + 最近项目（最多扫描 6 个），跨项目列出可复用工作区
+    const paths = [];
+    const pushPath = p => {
+      if (!p) return;
+      if (paths.some(x => x.toLowerCase() === p.toLowerCase())) return;
+      paths.push(p);
+    };
+    pushPath(projectPath);
+    for (const p of (appConfig.recentProjects || [])) pushPath(p);
 
-    // 没有可复用的 → 直接新建，保持原来的手感
-    if (reuse.length === 0) {
-      launchAgent(agent);
+    await populateRootSelect(); // 刷新当前项目缓存（running / 状态）
+    const res = await window.api.listAllWorkspaces({ projectPaths: paths.slice(0, 6) });
+    const groups = [];
+    if (res && res.success) {
+      for (const proj of res.projects) {
+        const items = reusableFrom(proj.workspaces || [], agent);
+        if (items.length) groups.push({ projectPath: proj.projectPath, items });
+      }
+    }
+    // 当前项目排在前面
+    groups.sort((a, b) => {
+      const cur = (projectPath || '').toLowerCase();
+      return (b.projectPath.toLowerCase() === cur ? 1 : 0) - (a.projectPath.toLowerCase() === cur ? 1 : 0);
+    });
+
+    const total = groups.reduce((n, g) => n + g.items.length, 0);
+    if (total === 0) {
+      launchAgent(agent); // 没有可复用的 → 直接新建，保持原来的手感
       return;
     }
 
@@ -301,7 +376,7 @@
       <span class="ami-icon">＋</span>
       <span class="ami-body">
         <span class="ami-name">新建工作区</span>
-        <span class="ami-sub">全新分支，干净开始</span>
+        <span class="ami-sub">在 ${escapeHtml(projectNameOf(projectPath))} 里开一个全新分支</span>
       </span>`;
     createBtn.addEventListener('click', () => {
       closeAgentMenu();
@@ -313,29 +388,22 @@
     sep.className = 'agent-menu-sep';
     menu.appendChild(sep);
 
-    const hint = document.createElement('div');
-    hint.className = 'agent-menu-hint';
-    hint.textContent = '复用已有工作区';
-    menu.appendChild(hint);
+    const head = document.createElement('div');
+    head.className = 'agent-menu-head';
+    head.innerHTML = `<span class="agent-menu-hint">复用已有工作区</span><span class="agent-menu-proj">${groups.length} 个项目</span>`;
+    menu.appendChild(head);
 
-    for (const w of reuse) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'agent-menu-item';
-      btn.setAttribute('role', 'menuitem');
-      const used = relativeTime(w.lastUsedAt || w.createdAt);
-      btn.innerHTML = `
-        <span class="ami-icon">↻</span>
-        <span class="ami-body">
-          <span class="ami-name">${escapeHtml(w.name)}</span>
-          <span class="ami-sub">${escapeHtml(w.branch || '')}${used ? ` · ${escapeHtml(used)}` : ''}</span>
-        </span>
-        <span class="ami-dirty" data-ws="${escapeHtml(w.id)}">…</span>`;
-      btn.addEventListener('click', () => {
-        closeAgentMenu();
-        launchAgent(agent, w.id);
-      });
-      menu.appendChild(btn);
+    for (const g of groups) {
+      const gHead = document.createElement('div');
+      gHead.className = 'agent-menu-group';
+      const isCurrent = g.projectPath.toLowerCase() === (projectPath || '').toLowerCase();
+      const prettyPath = String(g.projectPath).replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+      gHead.innerHTML = `
+        <span class="amg-name">${escapeHtml(projectNameOf(g.projectPath))}${isCurrent ? '<span class="amg-cur">当前</span>' : ''}</span>
+        <span class="amg-path" title="${escapeHtml(g.projectPath)}">${escapeHtml(prettyPath)}</span>`;
+      menu.appendChild(gHead);
+
+      for (const w of g.items) makeReuseItem(agent, w, g.projectPath, menu);
     }
 
     document.body.appendChild(menu);
@@ -354,18 +422,6 @@
 
     document.addEventListener('mousedown', onAgentMenuOutside, true);
     document.addEventListener('keydown', onAgentMenuKey, true);
-
-    // 异步补上每个工作区的未提交改动数
-    for (const w of reuse) {
-      window.api.gitStatus({ projectPath, wtPath: w.worktreePath }).then(st => {
-        const el = menu.querySelector(`.ami-dirty[data-ws="${w.id}"]`);
-        if (!el) return;
-        if (!st || !st.success) { el.textContent = ''; return; }
-        const n = (st.dirty || []).length;
-        el.textContent = n ? `${n} 个改动` : '干净';
-        el.classList.toggle('is-clean', n === 0);
-      }).catch(() => {});
-    }
   }
 
   // ---------- 轻量提示条 ----------

@@ -345,6 +345,33 @@ ipcMain.handle('workspace:list', async (e, { projectPath }) => {
   }
 });
 
+// 跨项目列出工作区（启动弹层用）：只扫传入的项目列表，避免全盘遍历
+ipcMain.handle('workspace:list-all', async (e, { projectPaths }) => {
+  try {
+    const busy = new Set();
+    for (const s of sessions.values()) {
+      if (s.workspaceId && !s.exited) busy.add(s.workspaceId);
+    }
+    const projects = [];
+    for (const p of (Array.isArray(projectPaths) ? projectPaths : [])) {
+      if (!p) continue;
+      try {
+        const list = await workspaces.list(p);
+        projects.push({
+          projectPath: p,
+          name: path.basename(p),
+          workspaces: list.map(w => ({ ...w, projectPath: p, running: busy.has(w.id) }))
+        });
+      } catch {
+        // 项目目录不可访问：跳过，不影响其他项目
+      }
+    }
+    return { success: true, projects };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('workspace:create', async (e, { projectPath, agentCommand, name }) => {
   try {
     const cfg = config.read();
