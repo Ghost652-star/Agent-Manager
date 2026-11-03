@@ -959,6 +959,19 @@ body.dragging .file-tree {
   color: var(--text-dim);
 }
 
+/* 恢复的历史会话：半透明 + 虚线边框，点击可重启 */
+.tab-restored {
+  opacity: 0.65;
+  border-bottom: 2px dashed var(--border-strong);
+}
+.tab-restored:hover {
+  opacity: 1;
+}
+.tab-restored .tab-agent {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
 .tab-agent {
   font-weight: 500;
 }
@@ -1549,6 +1562,18 @@ body.dragging .file-tree {
   letter-spacing: 0.04em;
 }
 
+.git-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.git-btn-row .btn {
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 10px;
+}
+
 .git-project-header {
   font-size: 9.5px;
   font-weight: 600;
@@ -1893,6 +1918,22 @@ body.dragging .file-tree {
 
 .tree-item.is-new .tree-name {
   color: var(--success);
+}
+
+/* scratch 目录（.agent-manager）：临时角标 */
+.tree-item.is-scratch .tree-name {
+  color: var(--text-dim);
+}
+.tree-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 8px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  background: var(--panel);
+  letter-spacing: 0.04em;
 }
 
 /* ---------- 降级动效：尊重系统设置 ---------- */

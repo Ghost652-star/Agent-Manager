@@ -57,4 +57,4 @@ function write(cfg) {
   fs.renameSync(tmp, target);
 }
 
-module.exports = { read, write };
+module.exports = { read, write, configDir, configPath };

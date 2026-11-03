@@ -7,9 +7,15 @@
 ## 功能特性
 
 - **多 Agent 并行**：同时启动任意多个 Agent 会话，每个会话一个终端 Tab
-- **Git Worktree 隔离**：每个 Agent 自动获得独立的工作树和分支（`agent/<agent名>`）；同一个 Agent 多开时自动编号为 `agent/claude-2`、`agent/claude-3`，不会互相覆盖
+- **三类工作区**：
+  - **默认工作区**（`default`）= 项目主目录，不可删/不可重命名
+  - **工具工作区**（`managed`）= 工具创建的 Git Worktree，可重命名/归档/清理
+  - **外部工作区**（`external`）= 挂载你已有的 Worktree，工具只引用、绝不改动
+- **Git Worktree 隔离**：每个 Agent 自动获得独立的工作树和分支（`agent/<agent名>`）；同一个 Agent 多开时自动编号为 `agent/claude-2`、`agent/claude-3`，不会互相覆盖；创建时带 `--no-track`，`git push` 不会误推到 base 分支
 - **终端内嵌**：基于 node-pty + xterm.js 的真实终端体验，支持 256 色
-- **Git 状态面板**：只读查看各 Agent 工作树的脏文件、领先/落后主分支的提交数、最新提交，以及单文件 diff
+- **审查闭环**：Git 面板直接合并回主分支（先看 diff 统计）、丢弃全部改动（二次确认）、清理工作区
+- **会话持久化**：重启后历史会话以灰标签恢复，一键用原 agent + 原工作区重启
+- **Scratch 目录**：每个工具工作区自带 `.agent-manager/` 临时目录（零 git 占用），放 agent 的临时文档
 - **文件浏览器**：实时浏览各 Agent Worktree 的文件改动，支持只读文件预览（2MB 以内文本文件）
 - **完成通知**：Agent 空闲 60 秒且窗口不在前台时弹系统通知，点击跳转到对应会话
 - **Agent 自动检测**：自动扫描系统 PATH，识别已安装的 CLI Agent

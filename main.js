@@ -6,6 +6,8 @@ const { execFile } = require('child_process');
 const pty = require('node-pty');
 const chokidar = require('chokidar');
 const worktree = require('./worktree');
+const workspaces = require('./workspaces');
+const sessionsStore = require('./sessions');
 const git = require('./git');
 const agents = require('./agents');
 const config = require('./config');
@@ -82,7 +84,16 @@ if (!gotSingleInstanceLock) {
     mainWindow.focus();
   });
 
-  app.whenReady().then(createWindow);
+  app.whenReady().then(() => {
+    // 启动时：清理 30 天前的旧会话；把残留的 running 状态改为 exited（进程已随重启消失）
+    try {
+      sessionsStore.prune();
+      for (const s of sessionsStore.list()) {
+        if (s.status === 'running') sessionsStore.setStatus(s.id, 'exited');
+      }
+    } catch { /* 持久化清理失败不影响启动 */ }
+    createWindow();
+  });
 }
 
 app.on('window-all-closed', () => {
@@ -255,6 +266,127 @@ ipcMain.handle('fs:readfile', async (e, { root, relPath }) => {
 
 ipcMain.handle('agent:detect', async () => agents.detect());
 
+// ---------- 会话持久化（重启恢复） ----------
+
+ipcMain.handle('session:list', async (e, { projectPath }) => {
+  try {
+    return { success: true, sessions: sessionsStore.list(projectPath) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('session:forget', async (e, { sessionId }) => {
+  try {
+    return { success: true, removed: sessionsStore.forget(sessionId) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// 恢复前体检：工作区是否还在、agent 是否可用
+ipcMain.handle('session:check', async (e, { projectPath, sessionId }) => {
+  const rec = sessionsStore.byId(sessionId);
+  if (!rec) return { success: false, error: '会话记录不存在' };
+
+  const ws = rec.workspaceId ? await workspaces.byId(projectPath, rec.workspaceId) : null;
+  const missing = !ws || ws.status === 'missing';
+  const agentList = await agents.detect();
+  const agentOk = agentList.some(a => a.command === rec.agentCommand);
+
+  return {
+    success: true,
+    session: rec,
+    workspace: ws,
+    workspaceMissing: missing,
+    agentOk
+  };
+});
+
+// ---------- 工作区（三类：default / managed / external） ----------
+
+ipcMain.handle('workspace:list', async (e, { projectPath }) => {
+  try {
+    return { success: true, workspaces: await workspaces.list(projectPath) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('workspace:create', async (e, { projectPath, agentCommand, name }) => {
+  try {
+    const cfg = config.read();
+    return { success: true, workspace: await workspaces.createManaged(projectPath, agentCommand, cfg, name) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('workspace:attach', async (e, { projectPath, path: wtPath }) => {
+  try {
+    return { success: true, workspace: await workspaces.attachExternal(projectPath, wtPath) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('workspace:rename', async (e, { projectPath, id, name }) => {
+  try {
+    return { success: true, workspace: await workspaces.renameWorkspace(projectPath, id, name) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('workspace:archive', async (e, { projectPath, id }) => {
+  try {
+    return { success: true, result: await workspaces.archive(projectPath, id) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// ---------- 审查闭环（M4） ----------
+
+// 查看 worktree 相对 base 的 diff 统计
+ipcMain.handle('review:diffstat', async (e, { projectPath, workspaceId }) => {
+  try {
+    const ws = await workspaces.byId(projectPath, workspaceId);
+    if (!ws) throw new Error('工作区不存在');
+    const stats = await worktree.diffStats(projectPath, ws.worktreePath, ws.baseBranch || 'HEAD');
+    return { success: true, ...stats };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// 合并回 base 分支
+ipcMain.handle('review:merge', async (e, { projectPath, workspaceId }) => {
+  try {
+    const ws = await workspaces.byId(projectPath, workspaceId);
+    if (!ws) throw new Error('工作区不存在');
+    const result = await worktree.mergeToBase(projectPath, ws.worktreePath, ws.branch, ws.baseBranch);
+    return { success: true, ...result };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// 丢弃全部未提交改动（二次确认由前端处理）
+ipcMain.handle('review:discard', async (e, { projectPath, workspaceId, confirm }) => {
+  try {
+    const ws = await workspaces.byId(projectPath, workspaceId);
+    if (!ws) throw new Error('工作区不存在');
+    const count = await worktree.countDirty(ws.worktreePath);
+    if (count === 0) return { success: true, discarded: 0 };
+    if (!confirm) return { success: false, error: '需要确认', dirtyCount: count };
+    await worktree.discardAllChanges(ws.worktreePath);
+    return { success: true, discarded: count };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // ---------- 任务完成通知（空闲检测） ----------
 // 原理：终端持续无输出 + 软件窗口不在前台 → 弹系统通知。
 // 不做关键词匹配（各家 agent 提示语不同且常变，误报率高），只用两个稳定信号。
@@ -291,7 +423,7 @@ setInterval(() => {
   }
 }, 5000);
 
-ipcMain.handle('agent:launch', async (e, { projectPath, agentCommand, sessionId }) => {
+ipcMain.handle('agent:launch', async (e, { projectPath, agentCommand, sessionId, workspaceId }) => {
   try {
     // 命令来自检测列表，仍做一次白名单校验，避免被拼接成任意命令
     if (!/^[A-Za-z0-9._-]+$/.test(String(agentCommand))) {
@@ -299,10 +431,20 @@ ipcMain.handle('agent:launch', async (e, { projectPath, agentCommand, sessionId 
     }
 
     const cfg = config.read();
-    const wtPath = await worktree.ensure(projectPath, agentCommand, cfg);
+
+    // 优先复用指定工作区（M2 会话恢复），否则新建 managed 工作区
+    let ws;
+    if (workspaceId) {
+      ws = await workspaces.byId(projectPath, workspaceId);
+      if (!ws) throw new Error('指定的工作区不存在');
+      if (ws.status === 'missing') throw new Error('工作区目录已丢失，无法启动');
+    } else {
+      ws = await workspaces.createManaged(projectPath, agentCommand, cfg);
+    }
+    const wtPath = ws.worktreePath;
 
     // Windows 用 -NoExit -Command 直接把 agent 作为 shell 的初始命令执行，
-    // 不再依赖“等 600ms 再敲命令”的时序，慢机器也不会丢命令。
+    // 不再依赖"等 600ms 再敲命令"的时序，慢机器也不会丢命令。
     const shellPath = process.platform === 'win32' ? 'powershell.exe' : 'bash';
     const shellArgs = process.platform === 'win32'
       ? ['-NoLogo', '-NoExit', '-Command', agentCommand]
@@ -317,11 +459,22 @@ ipcMain.handle('agent:launch', async (e, { projectPath, agentCommand, sessionId 
     sessions.set(sessionId, {
       pty: p,
       worktreePath: wtPath,
+      workspaceId: ws.id,
       agentCommand,
       projectPath,
       lastDataAt: Date.now(),
       idleNotified: false,
       exited: false
+    });
+
+    // 持久化会话记录（重启后可恢复）
+    sessionsStore.record({
+      sessionId,
+      agentCommand,
+      agentLabel: agentCommand,
+      projectPath,
+      workspaceId: ws.id,
+      worktreePath: wtPath
     });
 
     p.onData(data => {
@@ -338,13 +491,14 @@ ipcMain.handle('agent:launch', async (e, { projectPath, agentCommand, sessionId 
     p.onExit(({ exitCode, signal }) => {
       const s = sessions.get(sessionId);
       if (s) s.exited = true;
+      sessionsStore.setStatus(sessionId, 'exited');
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('pty:exit', { sessionId, exitCode, signal });
       }
       sessions.delete(sessionId);
     });
 
-    return { success: true, worktreePath: wtPath };
+    return { success: true, worktreePath: wtPath, workspaceId: ws.id, workspaceName: ws.name };
   } catch (err) {
     return { success: false, error: err.message };
   }

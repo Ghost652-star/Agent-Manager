@@ -9,6 +9,23 @@ contextBridge.exposeInMainWorld('api', {
   detectAgents: () => ipcRenderer.invoke('agent:detect'),
   launchAgent: params => ipcRenderer.invoke('agent:launch', params),
   cleanupWorktree: params => ipcRenderer.invoke('worktree:cleanup', params),
+
+  // 会话持久化（重启恢复）
+  listSessions: params => ipcRenderer.invoke('session:list', params),
+  forgetSession: params => ipcRenderer.invoke('session:forget', params),
+  checkSession: params => ipcRenderer.invoke('session:check', params),
+
+  // 工作区（default / managed / external）
+  listWorkspaces: params => ipcRenderer.invoke('workspace:list', params),
+  createWorkspace: params => ipcRenderer.invoke('workspace:create', params),
+  attachWorkspace: params => ipcRenderer.invoke('workspace:attach', params),
+  renameWorkspace: params => ipcRenderer.invoke('workspace:rename', params),
+  archiveWorkspace: params => ipcRenderer.invoke('workspace:archive', params),
+
+  // 审查闭环
+  reviewDiffstat: params => ipcRenderer.invoke('review:diffstat', params),
+  reviewMerge: params => ipcRenderer.invoke('review:merge', params),
+  reviewDiscard: params => ipcRenderer.invoke('review:discard', params),
   readDir: params => ipcRenderer.invoke('fs:readdir', params),
   readFile: params => ipcRenderer.invoke('fs:readfile', params),
   watchTree: params => ipcRenderer.invoke('fs:watch', params),

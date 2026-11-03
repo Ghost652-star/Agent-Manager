@@ -254,7 +254,7 @@
         content.innerHTML = `<div class="tab-error">启动失败：${escapeHtml(result.error)}</div>`;
         return;
       }
-      initTerminal(sessionId, result.worktreePath);
+      initTerminal(sessionId, result.worktreePath, result.workspaceId);
     } catch (err) {
       content.innerHTML = `<div class="tab-error">启动异常：${escapeHtml(err.message)}</div>`;
     }
@@ -298,12 +298,13 @@
     return div;
   }
 
-  function initTerminal(sessionId, worktreePath) {
+  function initTerminal(sessionId, worktreePath, workspaceId) {
     const session = sessions.get(sessionId);
     if (!session) return;
 
     session.worktreePath = worktreePath;
-    expSelection = sessionId; // 启动新 agent 后自动查看它的 worktree
+    session.workspaceId = workspaceId;
+    if (workspaceId) expSelection = workspaceId; // 启动新 agent 后自动查看它的工作区
     syncExplorerRoot();
 
     session.contentEl.innerHTML = '';
@@ -380,9 +381,9 @@
         });
       }
     }
-    // 切 tab 时面板自动跟随该 agent 的 worktree
+    // 切 tab 时面板自动跟随该 agent 的工作区
     const active = sessions.get(sessionId);
-    if (active && active.worktreePath) expSelection = sessionId;
+    if (active && active.workspaceId) expSelection = active.workspaceId;
     syncExplorerRoot();
   }
 
@@ -408,7 +409,6 @@
       activeSessionId = null;
       els.terminalArea.classList.add('hidden');
       els.emptyState.classList.remove('hidden');
-      expSelection = 'proj';
       syncExplorerRoot();
     } else if (activeSessionId === sessionId) {
       const first = sessions.values().next().value;
@@ -482,6 +482,139 @@
     }
     populateProjectSelect();
     renderRecentProjects();
+    restoreSessions(); // T2.6：恢复历史会话为灰标签
+  }
+
+  // ---------- 会话恢复（T2.6 / T2.7） ----------
+
+  async function restoreSessions() {
+    if (!projectPath) return;
+    const res = await window.api.listSessions({ projectPath });
+    if (!res.success) return;
+    for (const rec of res.sessions) {
+      if (rec.status === 'running') continue; // 不应出现，防御
+      addRestoredTab(rec);
+    }
+    if (res.sessions.some(s => s.status !== 'running')) {
+      els.emptyState.classList.add('hidden');
+      els.terminalArea.classList.remove('hidden');
+    }
+  }
+
+  function addRestoredTab(rec) {
+    const tab = document.createElement('div');
+    tab.className = 'tab tab-restored';
+    tab.dataset.session = rec.id;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', 'false');
+    tab.tabIndex = 0;
+    const segs = (rec.worktreePath || '').replace(/\\/g, '/').split('/').filter(Boolean);
+    const wtLabel = segs.slice(-2).join('/') || '—';
+    tab.innerHTML = `
+      <span class="tab-project hidden">…</span>
+      <span class="tab-agent">${escapeHtml(rec.agentLabel || rec.agentCommand)}</span>
+      <span class="tab-wt">${escapeHtml(wtLabel)}</span>
+      <button class="tab-close" type="button" title="忘记此会话" aria-label="忘记此会话">×</button>
+    `;
+    tab.title = `${rec.title || rec.agentLabel} · ${rec.worktreePath || ''}\n点击恢复会话`;
+
+    const content = document.createElement('div');
+    content.className = 'tab-content';
+    content.dataset.session = rec.id;
+    content.innerHTML = `
+      <div class="tab-loading">
+        会话已退出（${escapeHtml(rec.status === 'lost' ? '工作区目录丢失' : '进程已结束')}）<br>
+        点击此标签可重新启动。
+      </div>`;
+
+    sessions.set(rec.id, {
+      sessionId: rec.id,
+      agent: { label: rec.agentLabel || rec.agentCommand, command: rec.agentCommand },
+      tabEl: tab,
+      contentEl: content,
+      terminal: null,
+      exited: true,
+      restored: true,
+      projectPath,
+      worktreePath: rec.worktreePath,
+      workspaceId: rec.workspaceId
+    });
+
+    tab.addEventListener('click', e => {
+      if (e.target.closest('.tab-close')) {
+        window.api.forgetSession({ sessionId: rec.id });
+        closeRestoredTab(rec.id);
+        return;
+      }
+      if (!sessions.get(rec.id)?.restored) { switchTab(rec.id); return; }
+      restoreSession(rec);
+    });
+    tab.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (sessions.get(rec.id)?.restored) restoreSession(rec);
+        else switchTab(rec.id);
+      }
+    });
+
+    els.tabs.appendChild(tab);
+    els.tabContents.appendChild(content);
+    updateTabProjectLabels();
+    switchTab(rec.id);
+  }
+
+  function closeRestoredTab(sessionId) {
+    const s = sessions.get(sessionId);
+    if (!s) return;
+    s.tabEl.remove();
+    s.contentEl.remove();
+    sessions.delete(sessionId);
+    updateTabProjectLabels();
+    if (sessions.size === 0) {
+      activeSessionId = null;
+      els.terminalArea.classList.add('hidden');
+      els.emptyState.classList.remove('hidden');
+    }
+  }
+
+  // 恢复会话：体检 → 用原 agent + 原工作区重新启动
+  async function restoreSession(rec) {
+    const s = sessions.get(rec.id);
+    if (!s) return;
+
+    // T2.7：恢复前体检
+    const check = await window.api.checkSession({ projectPath, sessionId: rec.id });
+    if (!check.success) {
+      alert(`恢复失败：${check.error}`);
+      return;
+    }
+    if (check.workspaceMissing) {
+      alert('工作区目录已丢失，无法恢复。可关闭此标签或手动检查目录。');
+      return;
+    }
+    if (!check.agentOk) {
+      alert(`agent「${rec.agentCommand}」当前不可用，请先安装或刷新检测。`);
+      return;
+    }
+
+    // 复用原工作区启动
+    s.restored = false;
+    s.contentEl.innerHTML = '<div class="tab-loading">正在重新启动…</div>';
+    try {
+      const result = await window.api.launchAgent({
+        projectPath,
+        agentCommand: rec.agentCommand,
+        sessionId: rec.id,
+        workspaceId: rec.workspaceId
+      });
+      if (!result.success) {
+        s.contentEl.innerHTML = `<div class="tab-error">恢复失败：${escapeHtml(result.error)}</div>`;
+        return;
+      }
+      initTerminal(rec.id, result.worktreePath, result.workspaceId);
+    } catch (err) {
+      s.contentEl.innerHTML = `<div class="tab-error">恢复异常：${escapeHtml(err.message)}</div>`;
+    }
   }
 
   function renderRecentProjects() {
@@ -577,8 +710,8 @@
 
   // ---------- 右侧文件面板 ----------
 
-  // 浏览目标：'proj' = 真实项目目录；sessionId = 该 agent 的 worktree
-  let expSelection = 'proj';
+  // 浏览目标：工作区 id（default / managed / external）
+  let expSelection = '';
   let expLoadedRoot = null;      // 当前树已加载的根目录
   let expandedDirs = new Set();  // 已展开目录（相对路径），刷新时保留
   let currentFile = null;        // { root, relPath, name }
@@ -586,51 +719,57 @@
   let gitStatusRoot = null;      // 上次 git status 对应的根目录
   let gitStatusAt = 0;           // 上次 git status 的时间戳（用于节流）
   let viewerMode = 'content';    // 'content' | 'diff'
+  let workspaceCache = [];       // 当前项目的工作区列表（default/managed/external）
 
-  // 把「所有运行中 agent 的 worktree + 真实项目目录」填进下拉框
-  function populateRootSelect() {
+  // 把工作区列表（default / managed / external）填进下拉框
+  async function populateRootSelect() {
     const sel = els.expRootSelect;
     sel.innerHTML = '';
 
-    // 下拉框只显示当前项目的 worktree；多项目时才需要这个过滤
-    for (const s of sessions.values()) {
-      if (!s.worktreePath || s.projectPath !== projectPath) continue;
+    if (!projectPath) {
       const opt = document.createElement('option');
-      opt.value = s.sessionId;
-      opt.textContent = `⎇ ${s.agent.label}（worktree）`;
-      opt.title = s.worktreePath;
+      opt.value = '';
+      opt.textContent = '未选择项目';
+      sel.appendChild(opt);
+      return;
+    }
+
+    const res = await window.api.listWorkspaces({ projectPath });
+    workspaceCache = res.success ? (res.workspaces || []) : [];
+
+    const kindLabel = { default: '默认', managed: '工具', external: '外部' };
+    for (const w of workspaceCache) {
+      const opt = document.createElement('option');
+      opt.value = w.id;
+      const tag = kindLabel[w.kind] || w.kind;
+      const missing = w.status === 'missing' ? '（目录丢失）' : '';
+      opt.textContent = `[${tag}] ${w.name}${missing}`;
+      opt.title = `${w.worktreePath}${w.branch ? `\n分支：${w.branch}` : ''}`;
+      if (w.status === 'missing') opt.disabled = true;
       sel.appendChild(opt);
     }
 
-    const optProj = document.createElement('option');
-    optProj.value = 'proj';
-    optProj.textContent = '📁 项目目录（真实）';
-    optProj.title = projectPath || '';
-    sel.appendChild(optProj);
-
-    // 当前选择失效（会话已关闭或不属于当前项目）→ 回退到激活会话或项目目录
-    if (expSelection !== 'proj') {
-      const s = sessions.get(expSelection);
-      if (!s || !s.worktreePath || s.projectPath !== projectPath) {
-        const active = activeSessionId ? sessions.get(activeSessionId) : null;
-        expSelection = (active && active.worktreePath && active.projectPath === projectPath) ? active.sessionId : 'proj';
-      }
+    // 当前选择失效 → 回退到 default 或第一个工作区
+    const ids = workspaceCache.map(w => w.id);
+    if (!ids.includes(expSelection)) {
+      const def = workspaceCache.find(w => w.kind === 'default');
+      expSelection = def ? def.id : (ids[0] || '');
     }
     sel.value = expSelection;
   }
 
+  function currentWorkspace() {
+    return workspaceCache.find(w => w.id === expSelection) || null;
+  }
+
   function currentRoot() {
-    if (expSelection === 'proj') return projectPath;
-    const s = sessions.get(expSelection);
-    if (s && s.worktreePath) return s.worktreePath;
-    const active = activeSessionId ? sessions.get(activeSessionId) : null;
-    if (active && active.worktreePath) return active.worktreePath;
-    return projectPath;
+    const ws = currentWorkspace();
+    return ws ? ws.worktreePath : (projectPath || null);
   }
 
   // 会话 / 选择变化后调用：刷新下拉框；根目录变了才重建树（保留展开状态）
-  function syncExplorerRoot() {
-    populateRootSelect();
+  async function syncExplorerRoot() {
+    await populateRootSelect();
     const root = currentRoot();
     if (!root || root === expLoadedRoot) return;
     resetExplorer();
@@ -657,15 +796,18 @@
       return;
     }
     expLoadedRoot = root;
-    els.expRootPath.textContent = expSelection === 'proj' ? `[项目·真实] ${root}` : `[worktree] ${root}`;
+    const ws = currentWorkspace();
+    const kindLabel = { default: '默认', managed: '工具', external: '外部' };
+    const tag = ws ? (kindLabel[ws.kind] || ws.kind) : '工具';
+    els.expRootPath.textContent = `[${tag}] ${root}`;
     els.expRootPath.title = root;
     els.expTree.innerHTML = '';
     const ul = document.createElement('ul');
     ul.className = 'tree-list';
     els.expTree.appendChild(ul);
 
-    // worktree 模式：拉取 git 改动列表用于标色，并监视文件变化自动刷新
-    if (expSelection !== 'proj') {
+    // 拉取 git 改动列表用于标色，并监视文件变化自动刷新
+    {
       const now = Date.now();
       // git status 在大仓库上开销不低：同一根目录 1.5 秒内复用上次结果
       if (gitStatusRoot !== root || now - gitStatusAt > 1500) {
@@ -680,8 +822,6 @@
         gitStatusAt = now;
       }
       window.api.watchTree({ root }).catch(() => {});
-    } else {
-      changedMap = new Map();
     }
 
     await renderDir('', ul);
@@ -708,18 +848,23 @@
       item.tabIndex = 0;
       item.setAttribute('role', 'treeitem');
       item.dataset.rel = rel;
-      // worktree 改动标色：新增=绿，其他改动=琥珀
+      // T3.3：scratch 目录（.agent-manager）显示"临时"角标，不参与改动标色
+      const isScratch = entry.isDir && entry.name === '.agent-manager';
+      if (isScratch) item.classList.add('is-scratch');
+      // worktree 改动标色：新增=绿，其他改动=琥珀（scratch 目录跳过）
       let modClass = '';
-      if (!entry.isDir && changedMap.has(rel)) {
+      if (!entry.isDir && !isScratch && changedMap.has(rel)) {
         const status = changedMap.get(rel);
         modClass = status === '??' ? ' is-new' : ' is-modified';
         item.title = `${rel}（${status === '??' ? '新增' : '已修改'}）`;
       }
       item.className += modClass;
+      const scratchBadge = isScratch ? '<span class="tree-badge">临时</span>' : '';
       item.innerHTML = `
         <span class="tree-caret">${entry.isDir ? '▶' : ''}</span>
         <span class="tree-icon">${entry.isDir ? '▸' : '·'}</span>
         <span class="tree-name">${escapeHtml(entry.name)}</span>
+        ${scratchBadge}
       `;
       li.appendChild(item);
 
@@ -959,14 +1104,24 @@
             <span>${escapeHtml(d.file)}</span>
           </div>`).join('');
         const moreCount = Math.max(0, (st.dirty || []).length - 15);
-        let cleanupAction;
+
+        // 审查闭环按钮（M4）：合并 / 丢弃 / 清理
+        const wsId = s.workspaceId || '';
+        const canReview = wsId && s.worktreePath && !s.worktreeCleaned;
+        let actionBtns = '';
         if (s.worktreeCleaned) {
-          cleanupAction = '<span class="git-cleaned">工作树已清理</span>';
-        } else if (s.exited) {
-          cleanupAction = `<button class="btn btn-secondary btn-mini git-cleanup" data-session="${s.sessionId}">清理工作树</button>`;
+          actionBtns = '<span class="git-cleaned">工作树已清理</span>';
+        } else if (canReview) {
+          const mergeBtn = wsId ? `<button class="btn btn-primary btn-mini git-merge" data-ws="${escapeHtml(wsId)}" data-session="${s.sessionId}">合并回主分支</button>` : '';
+          const discardBtn = wsId ? `<button class="btn btn-secondary btn-mini git-discard" data-ws="${escapeHtml(wsId)}" data-session="${s.sessionId}">丢弃全部改动</button>` : '';
+          const cleanBtn = s.exited
+            ? `<button class="btn btn-secondary btn-mini git-cleanup" data-session="${s.sessionId}">清理工作树</button>`
+            : '<span class="git-cleaned">会话运行中，退出后可清理</span>';
+          actionBtns = `<div class="git-btn-row">${mergeBtn}${discardBtn}${cleanBtn}</div>`;
         } else {
-          cleanupAction = '<span class="git-cleaned">会话运行中，退出后可清理</span>';
+          actionBtns = '<span class="git-cleaned">会话运行中，退出后可清理</span>';
         }
+
         html += `
           <div class="git-item">
             <div class="git-item-head">
@@ -979,7 +1134,7 @@
               ${st.lastCommit ? `<br>最近提交：${escapeHtml(st.lastCommit)}` : ''}
             </div>
             ${dirtyFiles ? `<div class="git-files">${dirtyFiles}${moreCount ? `<div class="git-file"><span>…</span><span>还有 ${moreCount} 个文件</span></div>` : ''}</div>` : ''}
-            <div class="git-actions">${cleanupAction}</div>
+            <div class="git-actions">${actionBtns}</div>
           </div>`;
       }
     }
@@ -1003,9 +1158,101 @@
           return;
         }
         s.worktreeCleaned = true;
-        if (expSelection === s.sessionId) {
-          expSelection = 'proj';
-          syncExplorerRoot();
+        const def = workspaceCache.find(w => w.kind === 'default');
+        if (def) expSelection = def.id;
+        syncExplorerRoot();
+        renderGitStatus();
+      });
+    });
+
+    // 合并回主分支（M4）
+    body.querySelectorAll('.git-merge').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const wsId = btn.dataset.ws;
+        const s = sessions.get(btn.dataset.session);
+        if (!wsId) return;
+
+        // 先看 diff 统计
+        btn.disabled = true;
+        btn.textContent = '分析中…';
+        const ds = await window.api.reviewDiffstat({ projectPath, workspaceId: wsId });
+        if (!ds.success) {
+          alert(`获取 diff 统计失败：${ds.error}`);
+          btn.disabled = false;
+          btn.textContent = '合并回主分支';
+          return;
+        }
+        if (ds.files === 0) {
+          alert('没有新提交可合并。');
+          btn.disabled = false;
+          btn.textContent = '合并回主分支';
+          return;
+        }
+
+        const ok = confirm(
+          `确定把「${s ? s.agent.label : wsId}」合并回主分支？\n\n` +
+          `改动文件：${ds.files} 个（+${ds.insertions} / -${ds.deletions}）\n\n` +
+          `合并后可选择保留或归档此工作区。`
+        );
+        if (!ok) {
+          btn.disabled = false;
+          btn.textContent = '合并回主分支';
+          return;
+        }
+
+        btn.textContent = '合并中…';
+        const res = await window.api.reviewMerge({ projectPath, workspaceId: wsId });
+        if (!res.success) {
+          alert(`合并失败：${res.error}`);
+          btn.disabled = false;
+          btn.textContent = '合并回主分支';
+          return;
+        }
+
+        // T4.5：合并成功后提示保留 / 归档
+        const archive = confirm('合并成功！是否归档此工作区？\n\n（归档会删除工作区目录，保留分支）');
+        if (archive && s) {
+          try {
+            await window.api.archiveWorkspace({ projectPath, id: wsId });
+            s.worktreeCleaned = true;
+            const def = workspaceCache.find(w => w.kind === 'default');
+            if (def) expSelection = def.id;
+            syncExplorerRoot();
+          } catch { /* 归档失败不影响合并结果 */ }
+        }
+        renderGitStatus();
+      });
+    });
+
+    // 丢弃全部改动（M4）
+    body.querySelectorAll('.git-discard').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const wsId = btn.dataset.ws;
+        const s = sessions.get(btn.dataset.session);
+        if (!wsId) return;
+
+        // 先查有多少文件
+        const ds = await window.api.reviewDiscard({ projectPath, workspaceId: wsId, confirm: false });
+        const count = ds.dirtyCount || 0;
+        if (count === 0) {
+          alert('工作区干净，没有需要丢弃的改动。');
+          return;
+        }
+
+        const ok = confirm(
+          `⚠️ 确定丢弃「${s ? s.agent.label : wsId}」的全部未提交改动？\n\n` +
+          `将丢失 ${count} 个文件的改动，此操作不可撤销！`
+        );
+        if (!ok) return;
+
+        btn.disabled = true;
+        btn.textContent = '丢弃中…';
+        const res = await window.api.reviewDiscard({ projectPath, workspaceId: wsId, confirm: true });
+        if (!res.success) {
+          alert(`丢弃失败：${res.error}`);
+          btn.disabled = false;
+          btn.textContent = '丢弃全部改动';
+          return;
         }
         renderGitStatus();
       });
