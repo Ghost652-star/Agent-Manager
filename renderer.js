@@ -292,7 +292,7 @@
       : `创建于 ${formatLastUsed(w.createdAt)}`;
     btn.title = `${w.worktreePath}\n项目：${projPath}\n分支：${w.branch || '—'}\n${when}`;
     btn.innerHTML = `
-      <span class="ami-icon">↻</span>
+      <span class="ami-icon">${icon('restore')}</span>
       <span class="ami-body">
         <span class="ami-name">${escapeHtml(label)}</span>
         <span class="ami-sub">${escapeHtml(w.branch || '')} · ${escapeHtml(when)}</span>
@@ -373,7 +373,7 @@
     createBtn.className = 'agent-menu-item is-primary';
     createBtn.setAttribute('role', 'menuitem');
     createBtn.innerHTML = `
-      <span class="ami-icon">＋</span>
+      <span class="ami-icon">${icon('plus')}</span>
       <span class="ami-body">
         <span class="ami-name">新建工作区</span>
         <span class="ami-sub">在 ${escapeHtml(projectNameOf(projectPath))} 里开一个全新分支</span>
@@ -496,7 +496,7 @@
       <span class="tab-project hidden">…</span>
       <span class="tab-agent">${escapeHtml(agent.label)}</span>
       <span class="tab-wt">…</span>
-      <button class="tab-close" type="button" title="关闭会话" aria-label="关闭会话">×</button>
+      <button class="tab-close" type="button" title="关闭会话" aria-label="关闭会话">${icon('x', 'icon icon-xs')}</button>
     `;
     tab.addEventListener('click', e => {
       if (e.target.closest('.tab-close')) {
@@ -640,6 +640,11 @@
     }
   }
 
+  // 复用 index.html 里的 SVG sprite，保持图标与工具栏一致
+  function icon(name, cls = 'icon') {
+    return `<svg class="${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+  }
+
   function escapeHtml(str) {
     return String(str)
       .replace(/&/g, '&amp;')
@@ -738,7 +743,7 @@
       <span class="tab-project hidden">…</span>
       <span class="tab-agent">${escapeHtml(rec.agentLabel || rec.agentCommand)}</span>
       <span class="tab-wt">${escapeHtml(wtLabel)}</span>
-      <button class="tab-close" type="button" title="忘记此会话" aria-label="忘记此会话">×</button>
+      <button class="tab-close" type="button" title="忘记此会话" aria-label="忘记此会话">${icon('x', 'icon icon-xs')}</button>
     `;
     tab.title = `${rec.title || rec.agentLabel} · ${rec.worktreePath || ''}\n点击恢复会话`;
 
@@ -1085,8 +1090,8 @@
       item.className += modClass;
       const scratchBadge = isScratch ? '<span class="tree-badge">临时</span>' : '';
       item.innerHTML = `
-        <span class="tree-caret">${entry.isDir ? '▶' : ''}</span>
-        <span class="tree-icon">${entry.isDir ? '▸' : '·'}</span>
+        <span class="tree-caret">${entry.isDir ? icon('chevron-right', 'icon icon-caret') : ''}</span>
+        <span class="tree-icon">${entry.isDir ? icon('folder', 'icon icon-node') : icon('file', 'icon icon-node')}</span>
         <span class="tree-name">${escapeHtml(entry.name)}</span>
         ${scratchBadge}
       `;
@@ -1278,7 +1283,7 @@
       html += `
         <div class="git-item">
           <div class="git-item-head">
-            <span class="git-name">📁 项目主目录</span>
+            <span class="git-name">${icon('folder', 'icon icon-node')} 项目主目录</span>
             <span class="git-branch">${escapeHtml(proj.wtBranch || '未知分支')}</span>
           </div>
           <div class="git-sub">${dirtyCount ? `${dirtyCount} 个未提交改动` : '工作区干净'}</div>
@@ -1308,7 +1313,7 @@
         if (s.worktreeCleaned) {
           html += `
             <div class="git-item">
-              <div class="git-item-head"><span class="git-name">⎇ ${escapeHtml(s.agent.label)}</span></div>
+              <div class="git-item-head"><span class="git-name">${icon('branch', 'icon icon-node')} ${escapeHtml(s.agent.label)}</span></div>
               <div class="git-sub">工作树已清理</div>
             </div>`;
           continue;
@@ -1317,7 +1322,7 @@
         if (!st.success) {
           html += `
             <div class="git-item">
-              <div class="git-item-head"><span class="git-name">⎇ ${escapeHtml(s.agent.label)}</span></div>
+              <div class="git-item-head"><span class="git-name">${icon('branch', 'icon icon-node')} ${escapeHtml(s.agent.label)}</span></div>
               <div class="git-sub">读取状态失败：${escapeHtml(st.error || '')}</div>
             </div>`;
           continue;
@@ -1349,7 +1354,7 @@
         html += `
           <div class="git-item">
             <div class="git-item-head">
-              <span class="git-name">⎇ ${escapeHtml(s.agent.label)}</span>
+              <span class="git-name">${icon('branch', 'icon icon-node')} ${escapeHtml(s.agent.label)}</span>
               <span class="git-branch" title="${escapeHtml(st.wtBranch || '')}">${escapeHtml(st.wtBranch || '')}</span>
             </div>
             <div class="git-sub">
