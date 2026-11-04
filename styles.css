@@ -58,9 +58,19 @@
   --shadow-2: 0 12px 34px rgba(9, 12, 20, 0.5), 0 2px 10px rgba(0, 0, 0, 0.4);
   --shadow-3: 0 30px 80px rgba(6, 9, 16, 0.62), 0 6px 20px rgba(0, 0, 0, 0.45);
 
+  /* 效果层：辉光、玻璃、上打光表面 */
+  --glow-accent: 0 0 0 1px rgba(245, 165, 36, 0.28), 0 6px 24px rgba(245, 165, 36, 0.22);
+  --glow-accent-soft: 0 0 0 1px rgba(245, 165, 36, 0.16), 0 4px 18px rgba(245, 165, 36, 0.12);
+  --glow-danger: 0 0 0 1px rgba(240, 82, 82, 0.3), 0 4px 18px rgba(240, 82, 82, 0.18);
+  --glass: blur(16px) saturate(150%);
+  --surface-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 62%);
+  --panel-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 55%);
+  --row-sweep: linear-gradient(100deg, rgba(245, 165, 36, 0.12), rgba(245, 165, 36, 0.03) 55%, transparent);
+
   /* 动效 */
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-out: cubic-bezier(0.33, 1, 0.68, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
   --dur-fast: 160ms;
   --dur-base: 280ms;
   --dur-slow: 480ms;
@@ -240,6 +250,27 @@ body::after {
   }
 }
 
+/* 主按钮 hover 扫光 */
+@keyframes sheen {
+  from {
+    transform: translateX(-120%) skewX(-18deg);
+  }
+  to {
+    transform: translateX(220%) skewX(-18deg);
+  }
+}
+
+/* 表面辉光呼吸：仅用于活跃状态提示 */
+@keyframes glow-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px rgba(245, 165, 36, 0.22), 0 4px 18px rgba(245, 165, 36, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(245, 165, 36, 0.34), 0 6px 26px rgba(245, 165, 36, 0.2);
+  }
+}
+
 /* ---------- 应用骨架 ---------- */
 
 .app {
@@ -300,7 +331,9 @@ body.dragging .file-tree {
   width: var(--sidebar-w);
   min-width: var(--sidebar-w);
   background: var(--surface);
+  background-image: var(--surface-grad);
   border-right: 1px solid var(--border);
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.25);
   display: flex;
   flex-direction: column;
   transition: width var(--dur-base) var(--ease), min-width var(--dur-base) var(--ease),
@@ -385,6 +418,8 @@ body.dragging .file-tree {
 .panel {
   padding: var(--space-3) var(--space-4) var(--space-4);
   border-bottom: 1px solid var(--border);
+  background-image: var(--panel-grad);
+  transition: background-color var(--dur-base) ease;
 }
 
 .panel-grow {
@@ -419,6 +454,8 @@ body.dragging .file-tree {
 /* ---------- 按钮 ---------- */
 
 .btn {
+  position: relative;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -427,8 +464,9 @@ body.dragging .file-tree {
   height: 34px;
   padding: 0 var(--space-4);
   border-radius: var(--radius-md);
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   background: var(--panel);
+  background-image: var(--panel-grad);
   color: var(--text);
   font-family: inherit;
   font-size: 12.5px;
@@ -436,18 +474,21 @@ body.dragging .file-tree {
   letter-spacing: 0.01em;
   cursor: pointer;
   transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease,
-    transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) ease, color var(--dur-fast) ease;
+    transform var(--dur-fast) var(--ease), box-shadow var(--dur-base) var(--ease),
+    color var(--dur-fast) ease;
 }
 
 .btn:hover {
   background: var(--panel-hover);
+  border-color: var(--border-strong);
   transform: translateY(-1px);
   box-shadow: var(--shadow-1);
 }
 
 .btn:active {
-  transform: translateY(0) scale(0.99);
+  transform: translateY(0) scale(0.985);
   box-shadow: none;
+  transition-duration: 90ms;
 }
 
 .btn:disabled {
@@ -459,15 +500,38 @@ body.dragging .file-tree {
 
 .btn-primary {
   background: linear-gradient(180deg, var(--accent-bright), var(--accent));
+  background-image: linear-gradient(180deg, var(--accent-bright), var(--accent));
   color: #1a1205;
-  border-color: rgba(255, 196, 92, 0.6);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 10px rgba(245, 158, 11, 0.18);
+  border-color: rgba(255, 200, 97, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38), 0 2px 12px rgba(245, 165, 36, 0.22);
 }
 
 .btn-primary:hover {
   background: linear-gradient(180deg, #ffd27a, #f7a91c);
-  border-color: rgba(255, 196, 92, 0.75);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 4px 18px rgba(245, 158, 11, 0.3);
+  background-image: linear-gradient(180deg, #ffd27a, #f7a91c);
+  border-color: rgba(255, 200, 97, 0.75);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), var(--glow-accent);
+  transform: translateY(-1px);
+}
+
+.btn-primary:active {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 1px 6px rgba(245, 165, 36, 0.18);
+}
+
+/* 主按钮 hover 扫光：一次性斜向高光扫过 */
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 46%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.42), transparent);
+  transform: translateX(-120%) skewX(-18deg);
+  pointer-events: none;
+}
+
+.btn-primary:hover::after {
+  animation: sheen 620ms var(--ease) forwards;
 }
 
 .btn-ghost {
@@ -478,13 +542,15 @@ body.dragging .file-tree {
 }
 
 .btn-ghost:hover {
-  border-color: var(--border-strong);
+  border-color: var(--accent-border);
   color: var(--text);
-  background: var(--panel);
+  background: var(--accent-dim);
+  box-shadow: var(--glow-accent-soft);
 }
 
 .btn-secondary {
   background: var(--panel-hover);
+  background-image: var(--panel-grad);
   border-color: var(--border);
   color: var(--text);
 }
@@ -492,6 +558,7 @@ body.dragging .file-tree {
 .btn-secondary:hover {
   background: var(--panel-active);
   border-color: var(--border-strong);
+  box-shadow: var(--shadow-1);
 }
 
 .btn-mini {
@@ -640,29 +707,51 @@ body.dragging .file-tree {
 }
 
 .agent-item {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: var(--space-3);
   padding: 9px var(--space-3);
   background: var(--panel);
+  background-image: var(--panel-grad);
   border: 1px solid var(--border);
   border-left: 2px solid transparent;
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease,
-    transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) ease;
+    transform var(--dur-fast) var(--ease), box-shadow var(--dur-base) var(--ease);
+}
+
+/* hover 时琥珀扫光从左侧掠过 */
+.agent-item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--row-sweep);
+  opacity: 0;
+  transform: translateX(-12%);
+  transition: opacity var(--dur-base) var(--ease), transform var(--dur-slow) var(--ease);
+  pointer-events: none;
 }
 
 .agent-item:hover {
   background: var(--panel-hover);
   border-color: var(--border-strong);
   border-left-color: var(--accent);
-  transform: translateX(2px);
+  transform: translateX(3px);
+  box-shadow: var(--shadow-1), var(--glow-accent-soft);
+}
+
+.agent-item:hover::before {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .agent-item:active {
   background: var(--panel-active);
-  transform: translateX(1px);
+  transform: translateX(1px) scale(0.99);
+  transition-duration: 90ms;
 }
 
 .agent-status {
@@ -757,11 +846,14 @@ body.dragging .file-tree {
 .icon-btn:hover {
   color: var(--text);
   background: var(--panel-hover);
-  border-color: var(--border);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-1);
+  transform: translateY(-1px);
 }
 
 .icon-btn:active {
-  transform: scale(0.94);
+  transform: scale(0.92);
+  transition-duration: 80ms;
 }
 
 /* 设置按钮：带描边的强调变体，hover 时齿轮微转 */
@@ -947,6 +1039,7 @@ body.dragging .file-tree {
   padding-right: 112px; /* 给右上角 Git 状态按钮留位，避免遮挡标签 */
   border-bottom: 1px solid var(--border);
   background: var(--surface);
+  background-image: var(--surface-grad);
   overflow-x: auto;
   overflow-y: hidden;
   min-height: 44px;
@@ -958,6 +1051,7 @@ body.dragging .file-tree {
 }
 
 .tab {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -980,16 +1074,43 @@ body.dragging .file-tree {
   animation: tab-in 220ms var(--ease) backwards;
 }
 
+/* 活动指示条：缩放过渡代替闪现，退出也顺滑 */
+.tab::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -2px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-bright));
+  box-shadow: 0 0 12px rgba(245, 165, 36, 0.55);
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform var(--dur-base) var(--ease);
+}
+
 .tab:hover {
   color: var(--text);
   background: var(--panel-hover);
+  background-image: var(--panel-grad);
+}
+
+.tab:hover::after {
+  transform: scaleX(0.35);
+  opacity: 0.5;
 }
 
 .tab.active {
   color: var(--text);
   background: var(--panel);
-  border-bottom-color: var(--accent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  background-image: var(--surface-grad);
+  border-bottom-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.tab.active::after {
+  transform: scaleX(1);
 }
 
 .tab:focus-visible {
@@ -1062,7 +1183,9 @@ body.dragging .file-tree {
   line-height: 1;
   cursor: pointer;
   opacity: 0;
-  transition: opacity var(--dur-fast) ease, background var(--dur-fast) ease, color var(--dur-fast) ease;
+  transition: opacity var(--dur-fast) ease, background var(--dur-fast) ease,
+    color var(--dur-fast) ease, transform var(--dur-base) var(--ease-spring),
+    box-shadow var(--dur-fast) ease;
 }
 
 .tab:hover .tab-close,
@@ -1074,6 +1197,8 @@ body.dragging .file-tree {
 .tab-close:hover {
   background: rgba(240, 82, 82, 0.18);
   color: var(--danger);
+  transform: rotate(90deg) scale(1.08);
+  box-shadow: var(--glow-danger);
 }
 
 .tab-contents {
@@ -1092,7 +1217,7 @@ body.dragging .file-tree {
 
 .tab-content.active {
   display: block;
-  animation: fade-in 180ms var(--ease-out);
+  animation: fade-in 240ms var(--ease-out), rise-in 320ms var(--ease) both;
 }
 
 .tab-content .xterm {
@@ -1219,6 +1344,8 @@ body.dragging .file-tree {
   padding: 0 var(--space-3);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
+  background-image: var(--surface-grad);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 .viewer-name {
@@ -1331,21 +1458,32 @@ body.dragging .file-tree {
 }
 
 .tree-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 5px;
   height: 24px;
   padding: 0 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   white-space: nowrap;
   color: var(--text);
   font-size: 12px;
   user-select: none;
-  transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) ease;
 }
 
 .tree-item:hover {
   background: var(--panel-hover);
+  background-image: var(--row-sweep);
+  transform: translateX(2px);
+  box-shadow: var(--shadow-1);
+}
+
+.tree-item:active {
+  transform: translateX(1px) scale(0.99);
+  transition-duration: 80ms;
 }
 
 .tree-item.selected {
@@ -1484,10 +1622,13 @@ body.dragging .file-tree {
   max-height: 66vh;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
+  background: rgba(18, 19, 23, 0.9);
+  background-image: var(--surface-grad);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-2);
+  box-shadow: var(--shadow-3), 0 0 40px rgba(245, 165, 36, 0.06);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
   overflow: hidden;
   transform-origin: top right;
 }
@@ -1533,14 +1674,19 @@ body.dragging .file-tree {
 .git-item {
   padding: var(--space-3);
   background: var(--panel);
+  background-image: var(--panel-grad);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  transition: border-color var(--dur-fast) ease, background var(--dur-fast) ease;
+  transition: border-color var(--dur-fast) ease, background var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease), box-shadow var(--dur-base) var(--ease);
 }
 
 .git-item:hover {
-  border-color: var(--border-strong);
+  border-color: var(--accent-border);
   background: var(--panel-hover);
+  background-image: var(--row-sweep);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-1), var(--glow-accent-soft);
 }
 
 .git-item-head {
@@ -1596,8 +1742,17 @@ body.dragging .file-tree {
   align-items: center;
   gap: 6px;
   font-size: 10.5px;
-  padding: 2px 0;
+  padding: 2px 6px;
+  margin: 0 -6px;
+  border-radius: var(--radius-sm);
   color: var(--text);
+  transition: background var(--dur-fast) ease, transform var(--dur-fast) var(--ease),
+    color var(--dur-fast) ease;
+}
+
+.git-file:hover {
+  background: var(--row-sweep);
+  transform: translateX(3px);
 }
 
 .git-file span:first-child {
@@ -1687,23 +1842,27 @@ body.dragging .file-tree {
 .modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(5, 5, 4, 0.72);
-  backdrop-filter: blur(8px) saturate(0.85);
-  -webkit-backdrop-filter: blur(8px) saturate(0.85);
+  background: rgba(4, 5, 8, 0.66);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
 }
 
 .modal-panel {
   position: relative;
   width: 540px;
   max-width: calc(100vw - var(--space-6));
-  background: var(--panel);
+  background: rgba(22, 23, 28, 0.86);
+  background-image: var(--surface-grad);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-3), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+  box-shadow: var(--shadow-3), 0 0 0 1px rgba(255, 255, 255, 0.05) inset,
+    0 0 60px rgba(245, 165, 36, 0.06);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
   overflow: hidden;
   opacity: 0;
-  transform: translateY(14px) scale(0.985);
-  transition: opacity var(--dur-base) var(--ease-out), transform 360ms var(--ease);
+  transform: translateY(16px) scale(0.97);
+  transition: opacity var(--dur-base) var(--ease-out), transform 380ms var(--ease);
 }
 
 .modal.open .modal-panel {
@@ -2034,19 +2193,18 @@ body.dragging .file-tree {
   min-width: 290px;
   max-width: 360px;
   padding: var(--space-2);
-  background: var(--panel);
+  background: rgba(22, 23, 28, 0.88);
+  background-image: var(--surface-grad);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-3);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3), 0 0 40px rgba(245, 165, 36, 0.07);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
   display: flex;
   flex-direction: column;
   gap: 2px;
-  animation: agent-menu-in 160ms var(--ease-out);
-}
-
-@keyframes agent-menu-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: none; }
+  transform-origin: top left;
+  animation: pop-in 240ms var(--ease);
 }
 
 .agent-menu-item {
@@ -2067,11 +2225,15 @@ body.dragging .file-tree {
 
 .agent-menu-item:hover {
   background: var(--panel-hover);
-  border-color: var(--border);
+  background-image: var(--row-sweep);
+  border-color: var(--border-strong);
+  transform: translateX(3px);
+  box-shadow: var(--shadow-1), var(--glow-accent-soft);
 }
 
 .agent-menu-item:active {
-  transform: scale(0.995);
+  transform: translateX(1px) scale(0.985);
+  transition-duration: 80ms;
 }
 
 .agent-menu-item:focus-visible {
@@ -2171,26 +2333,30 @@ body.dragging .file-tree {
   position: fixed;
   left: 50%;
   bottom: 26px;
-  transform: translate(-50%, 12px);
+  transform: translate(-50%, 18px);
   z-index: 80;
   max-width: min(560px, calc(100vw - 48px));
-  padding: 10px 16px;
-  background: var(--panel);
+  padding: 11px 18px;
+  background: rgba(22, 23, 28, 0.92);
+  background-image: var(--surface-grad);
   border: 1px solid var(--accent-border);
   border-left: 2px solid var(--accent);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-3);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3), var(--glow-accent-soft);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
   color: var(--text);
   font-size: 12px;
   line-height: 1.6;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+  transition: opacity 260ms var(--ease-out), transform 260ms var(--ease);
 }
 
 .toast.is-visible {
   opacity: 1;
-  transform: translate(-50%, 0);
+  transform: translate(-50%, 0) scale(1);
+  animation: glow-breathe 2.4s ease-in-out 2;
 }
 
 .toast.is-warn {
