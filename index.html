@@ -55,27 +55,20 @@
 
       <div class="panel">
         <div class="panel-title">项目</div>
-        <select id="project-select" class="project-select" title="选择项目"></select>
-        <button id="btn-open-project" class="btn btn-primary">
+        <ul id="project-list" class="proj-list"></ul>
+        <button id="btn-open-project" class="btn btn-ghost">
           <svg class="icon"><use href="#i-folder"/></svg>
-          打开项目
+          打开新项目
         </button>
       </div>
 
       <div class="panel">
-        <div class="panel-title">当前项目</div>
-        <div id="project-meta" class="project-meta hidden">
-          <div id="project-name" class="project-name"></div>
-          <div id="project-path" class="project-path"></div>
-        </div>
-        <div id="recent-projects" class="recent-projects hidden">
-          <div class="recent-title">最近打开</div>
-          <ul id="recent-list" class="recent-list"></ul>
-        </div>
+        <div class="panel-title">工作区</div>
+        <ul id="workspace-list" class="ws-list"></ul>
       </div>
 
       <div class="panel panel-grow">
-        <div class="panel-title">已安装 Agent</div>
+        <div class="panel-title">Agent</div>
         <ul id="agent-list" class="agent-list"></ul>
         <button id="btn-refresh-agents" class="btn btn-ghost">
           <svg class="icon"><use href="#i-refresh"/></svg>

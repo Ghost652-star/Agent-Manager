@@ -571,7 +571,6 @@ body.dragging .file-tree {
 
 /* ---------- 下拉选择器（统一自定义箭头） ---------- */
 
-.project-select,
 .root-select {
   appearance: none;
   -webkit-appearance: none;
@@ -587,112 +586,170 @@ body.dragging .file-tree {
   transition: border-color var(--dur-fast) ease, background-color var(--dur-fast) ease;
 }
 
-.project-select {
-  width: 100%;
-  height: 32px;
-  padding: 0 28px 0 10px;
-  margin-bottom: var(--space-3);
-  font-size: 12px;
-}
-
-.project-select:hover,
 .root-select:hover {
   border-color: var(--border-strong);
   background-color: var(--panel-hover);
 }
 
-.project-select:focus,
 .root-select:focus {
   border-color: var(--accent-border);
 }
 
-.project-select option {
+.root-select option {
   background: var(--surface);
   color: var(--text);
 }
 
-/* ---------- 最近项目 ---------- */
+/* ---------- 侧栏列表：项目 / 工作区 ----------
+   行状态规范（沿用 Orca）：闲置透明 → 悬停 accent 淡底 → 当前项 accent 底 + 内描边 */
 
-.recent-projects {
-  margin-top: var(--space-3);
-  padding: var(--space-2);
-  background: var(--panel);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-}
-
-.recent-title {
-  font-size: 9.5px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  padding: 2px var(--space-2) var(--space-2);
-}
-
-.recent-list {
+.proj-list,
+.ws-list {
   list-style: none;
-  margin: 0;
+  margin: 0 0 var(--space-3);
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 
-.recent-item {
+.list-empty {
+  padding: 6px var(--space-2);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.proj-item,
+.ws-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 7px var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease;
+}
+
+.proj-item:hover,
+.ws-item:hover {
+  background: var(--accent-dim);
+}
+
+.proj-item:focus-visible,
+.ws-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* 当前项目：卡片边框 + accent 淡底，与"当前查看的工作区"语义一致 */
+.proj-item.is-current {
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  cursor: default;
+}
+
+.proj-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 20px;
+  height: 20px;
+  color: var(--text-dim);
+}
+
+.proj-item.is-current .proj-icon {
+  color: var(--accent);
+}
+
+.proj-body {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 6px var(--space-2);
-  border-radius: var(--radius-sm);
-  border-left: 2px solid transparent;
-  cursor: pointer;
-  transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 
-.recent-item:hover {
-  background: var(--panel-hover);
-  border-left-color: var(--accent);
-}
-
-.recent-name {
-  font-size: 12px;
+.proj-name {
+  font-size: 13px;
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.recent-path {
-  font-size: 10px;
+.proj-path {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* ---------- 当前项目 ---------- */
-
-.project-meta {
-  padding: var(--space-3);
-  background: var(--panel);
-  border-radius: var(--radius-md);
+.proj-badge {
+  flex: 0 0 auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: var(--panel-active);
   border: 1px solid var(--border);
-  border-left: 2px solid var(--accent-border);
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
-.project-name {
-  font-weight: 600;
-  color: var(--text);
-  word-break: break-all;
+/* 工作区行：状态点 + 名称 + 分支（右对齐等宽） */
+.ws-dot {
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  opacity: 0.55;
+}
+
+.ws-item.is-running .ws-dot {
+  background: var(--success);
+  opacity: 1;
+  box-shadow: 0 0 8px rgba(46, 204, 113, 0.55);
+}
+
+.ws-item.is-broken .ws-dot {
+  background: var(--danger);
+  opacity: 1;
+}
+
+.ws-name {
+  flex: 1;
+  min-width: 0;
   font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.project-path {
-  font-size: 10.5px;
+.ws-branch {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 120px;
+  font-family: var(--font-mono);
+  font-size: 10px;
   color: var(--text-dim);
-  margin-top: 2px;
-  word-break: break-all;
-  line-height: 1.45;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-item.is-running .ws-name {
+  color: var(--text);
 }
 
 /* ---------- Agent 列表 ---------- */
@@ -706,67 +763,52 @@ body.dragging .file-tree {
   gap: var(--space-2);
 }
 
+/* Agent 行与项目/工作区行统一为一套行状态规范 */
 .agent-item {
   position: relative;
-  overflow: hidden;
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: 9px var(--space-3);
-  background: var(--panel);
-  background-image: var(--panel-grad);
-  border: 1px solid var(--border);
-  border-left: 2px solid transparent;
-  border-radius: var(--radius-md);
+  gap: var(--space-2);
+  padding: 7px var(--space-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease,
-    transform var(--dur-fast) var(--ease), box-shadow var(--dur-base) var(--ease);
-}
-
-/* hover 时琥珀扫光从左侧掠过 */
-.agent-item::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: var(--row-sweep);
-  opacity: 0;
-  transform: translateX(-12%);
-  transition: opacity var(--dur-base) var(--ease), transform var(--dur-slow) var(--ease);
-  pointer-events: none;
+    transform var(--dur-fast) var(--ease);
 }
 
 .agent-item:hover {
-  background: var(--panel-hover);
-  border-color: var(--border-strong);
-  border-left-color: var(--accent);
-  transform: translateX(3px);
-  box-shadow: var(--shadow-1), var(--glow-accent-soft);
-}
-
-.agent-item:hover::before {
-  opacity: 1;
-  transform: translateX(0);
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+  transform: translateX(2px);
 }
 
 .agent-item:active {
-  background: var(--panel-active);
   transform: translateX(1px) scale(0.99);
-  transition-duration: 90ms;
+  transition-duration: 80ms;
 }
 
 .agent-status {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--success);
   flex-shrink: 0;
-  box-shadow: 0 0 8px rgba(46, 204, 113, 0.5);
+  opacity: 0.45;
+  transition: opacity var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
+}
+
+/* 有会话在跑：状态点点亮并呼吸 */
+.agent-item.is-running .agent-status {
+  opacity: 1;
+  box-shadow: 0 0 8px rgba(46, 204, 113, 0.55);
   animation: pulse-dot 2.6s ease-in-out infinite;
 }
 
 .agent-name {
   font-weight: 500;
-  font-size: 12.5px;
+  font-size: 13px;
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -774,12 +816,13 @@ body.dragging .file-tree {
 }
 
 .agent-cmd {
+  font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--text-muted);
+  color: var(--text-dim);
   background: var(--bg);
   border: 1px solid var(--border);
   padding: 1px 6px;
-  border-radius: var(--radius-sm);
+  border-radius: 99px;
   flex-shrink: 0;
 }
 
@@ -1486,12 +1529,6 @@ body.dragging .file-tree {
   transition-duration: 80ms;
 }
 
-.tree-item.selected {
-  background: var(--accent-dim);
-  color: var(--accent);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
 .tree-item:focus-visible {
   outline-offset: -2px;
   border-radius: 3px;
@@ -1520,11 +1557,6 @@ body.dragging .file-tree {
   align-items: center;
   flex-shrink: 0;
   color: var(--text-dim);
-}
-
-.tree-item.is-dir .tree-icon {
-  color: var(--accent);
-  opacity: 0.8;
 }
 
 /* 图标尺寸档位：与各种密度的组件匹配 */
@@ -2147,15 +2179,6 @@ body.dragging .file-tree {
   color: var(--text-dim);
 }
 
-/* 文件树改动标色 */
-.tree-item.is-modified .tree-name {
-  color: var(--warning);
-}
-
-.tree-item.is-new .tree-name {
-  color: var(--success);
-}
-
 /* scratch 目录（.agent-manager）：临时角标 */
 .tree-item.is-scratch .tree-name {
   color: var(--text-dim);
@@ -2402,8 +2425,7 @@ body.dragging .file-tree {
 
 /* ---------- 排版一致性：路径/数字等宽，界面文案用 UI 字体 ---------- */
 
-.project-path,
-.recent-path,
+.proj-path,
 .file-tree-path,
 .setting-value,
 .git-branch,
@@ -2412,6 +2434,104 @@ body.dragging .file-tree {
 .amg-path,
 .setting-hint code {
   font-family: var(--font-mono);
+}
+
+/* ---------- 文件树：类型着色 + git 装饰色 ----------
+   装饰色只用于 git 状态，不复用为其它语义（沿用 Orca 的 --git-decoration-* 约定） */
+
+.tree-icon.is-folder {
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.tree-icon.is-ts,
+.tree-icon.is-tsx,
+.tree-icon.is-js,
+.tree-icon.is-jsx,
+.tree-icon.is-mjs {
+  color: #6ea8fe;
+}
+
+.tree-icon.is-json {
+  color: #e5c07b;
+}
+
+.tree-icon.is-md,
+.tree-icon.is-mdx {
+  color: #7fcf9a;
+}
+
+.tree-icon.is-css,
+.tree-icon.is-scss,
+.tree-icon.is-less {
+  color: #c58af9;
+}
+
+.tree-icon.is-html,
+.tree-icon.is-vue,
+.tree-icon.is-svelte {
+  color: #e06c75;
+}
+
+.tree-icon.is-py {
+  color: #56c8d8;
+}
+
+.tree-icon.is-java {
+  color: #e08b6a;
+}
+
+.tree-icon.is-sh,
+.tree-icon.is-bat,
+.tree-icon.is-ps1 {
+  color: #9aa4b2;
+}
+
+.tree-icon.is-img,
+.tree-icon.is-png,
+.tree-icon.is-jpg,
+.tree-icon.is-jpeg,
+.tree-icon.is-gif,
+.tree-icon.is-webp,
+.tree-icon.is-svg {
+  color: #d19a66;
+}
+
+.tree-icon.is-zip,
+.tree-icon.is-tar,
+.tree-icon.is-gz,
+.tree-icon.is-7z {
+  color: #c9a26b;
+}
+
+/* git 状态装饰色 */
+.tree-item.is-new .tree-name,
+.tree-item.is-added .tree-name {
+  color: #7fcf9a;
+}
+
+.tree-item.is-modified .tree-name {
+  color: #e5c07b;
+}
+
+.tree-item.is-deleted .tree-name {
+  color: #e06c75;
+  text-decoration: line-through;
+  text-decoration-color: rgba(224, 108, 117, 0.5);
+}
+
+.tree-item.is-renamed .tree-name {
+  color: #c58af9;
+}
+
+/* 选中行：accent 淡底 + 内描边，不加重描边（Orca 行状态规范） */
+.tree-item.selected {
+  background: var(--accent-dim);
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+}
+
+.tree-item.selected .tree-name {
+  color: var(--text);
 }
 
 .viewer-hint {

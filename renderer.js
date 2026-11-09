@@ -10,12 +10,8 @@
 
   const els = {
     btnOpenProject: document.getElementById('btn-open-project'),
-    projectSelect: document.getElementById('project-select'),
-    projectMeta: document.getElementById('project-meta'),
-    projectName: document.getElementById('project-name'),
-    projectPath: document.getElementById('project-path'),
-    recentProjects: document.getElementById('recent-projects'),
-    recentList: document.getElementById('recent-list'),
+    projectList: document.getElementById('project-list'),
+    workspaceList: document.getElementById('workspace-list'),
     agentList: document.getElementById('agent-list'),
     btnRefreshAgents: document.getElementById('btn-refresh-agents'),
     wtRoot: document.getElementById('wt-root'),
@@ -74,6 +70,9 @@
       session.exited = true;
       // 用类名控制视觉状态，避免直接写内联样式
       session.tabEl.classList.add('exited');
+      renderProjectList();
+      renderWorkspaceList();
+      renderAgents();
     }
   });
 
@@ -89,9 +88,16 @@
       return;
     }
     for (const agent of agents) {
+      // 运行中的 agent 状态点点亮
+      let running = 0;
+      for (const s of sessions.values()) {
+        if (s.agent && s.agent.command === agent.command && !s.exited) running += 1;
+      }
       const li = document.createElement('li');
-      li.className = 'agent-item';
-      li.title = `点击在 worktree 中启动 ${agent.label}`;
+      li.className = 'agent-item' + (running ? ' is-running' : '');
+      li.title = running
+        ? `点击在 worktree 中启动 ${agent.label}（当前有 ${running} 个会话在跑）`
+        : `点击在 worktree 中启动 ${agent.label}`;
       li.tabIndex = 0;
       li.setAttribute('role', 'button');
       li.innerHTML = `
@@ -134,8 +140,7 @@
       appConfig.recentProjects = (appConfig.recentProjects || []).filter(p => p !== path);
       appConfig.currentProject = appConfig.recentProjects[0] || null;
       persistConfig();
-      renderRecentProjects();
-      populateProjectSelect();
+      renderProjectList();
       // 回退到当前有效项目；如果当前项目也无效，就清空
       if (projectPath && projectPath !== path) return true;
       if (appConfig.currentProject) return setProject(appConfig.currentProject, false);
@@ -144,9 +149,6 @@
 
     projectPath = path;
     projectName = projectNameOf(path);
-    els.projectName.textContent = projectName;
-    els.projectPath.textContent = path;
-    els.projectMeta.classList.remove('hidden');
     els.wtRoot.textContent = formatWorktreeRoot(path);
 
     if (save) {
@@ -158,37 +160,63 @@
       persistConfig();
     }
 
-    renderRecentProjects();
-    populateProjectSelect();
+    renderProjectList();
     updateTabProjectLabels();
     syncExplorerRoot();
     return true;
   }
 
-  // 填充项目选择器：最近项目 + 当前打开的所有会话涉及的项目
-  function populateProjectSelect() {
-    const sel = els.projectSelect;
-    sel.innerHTML = '';
-    const known = new Set(appConfig.recentProjects || []);
-    for (const s of sessions.values()) {
-      if (s.projectPath) known.add(s.projectPath);
-    }
-    const list = [...known];
-    if (!projectPath && list.length === 0) {
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = '请打开一个项目';
-      sel.appendChild(opt);
+  // 项目列表：图标 + 名称 + 路径（等宽）+ 运行中会话数；当前项目以卡片边框标记
+  function renderProjectList() {
+    const ul = els.projectList;
+    if (!ul) return;
+    ul.innerHTML = '';
+
+    const known = [];
+    const push = p => {
+      if (!p) return;
+      if (known.some(x => x.toLowerCase() === p.toLowerCase())) return;
+      known.push(p);
+    };
+    for (const p of (appConfig.recentProjects || [])) push(p);
+    for (const s of sessions.values()) if (s.projectPath) push(s.projectPath);
+    push(projectPath);
+
+    if (known.length === 0) {
+      ul.innerHTML = '<li class="list-empty">还没有项目，先打开一个</li>';
       return;
     }
-    for (const p of list) {
-      const opt = document.createElement('option');
-      opt.value = p;
-      opt.textContent = projectNameOf(p);
-      opt.title = p;
-      sel.appendChild(opt);
+
+    for (const p of known) {
+      const isCurrent = (projectPath || '').toLowerCase() === p.toLowerCase();
+      let running = 0;
+      for (const s of sessions.values()) {
+        if (s.projectPath === p && !s.exited) running += 1;
+      }
+      const li = document.createElement('li');
+      li.className = 'proj-item' + (isCurrent ? ' is-current' : '');
+      li.title = p;
+      li.innerHTML = `
+        <span class="proj-icon">${icon(isCurrent ? 'app' : 'folder', 'icon icon-node')}</span>
+        <span class="proj-body">
+          <span class="proj-name">${escapeHtml(projectNameOf(p))}</span>
+          <span class="proj-path">${escapeHtml(p)}</span>
+        </span>
+        ${running ? `<span class="proj-badge">${running}</span>` : ''}
+      `;
+      if (!isCurrent) {
+        li.tabIndex = 0;
+        li.setAttribute('role', 'button');
+        li.addEventListener('click', () => setProject(p));
+        li.addEventListener('keydown', e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setProject(p);
+          }
+        });
+      }
+      ul.appendChild(li);
     }
-    if (projectPath) sel.value = projectPath;
   }
 
   // 当存在多个项目时，tab 标签才显示项目名前缀
@@ -469,6 +497,8 @@
       worktreePath: null
     });
     updateTabProjectLabels();
+    renderProjectList();
+    renderAgents();
 
     switchTab(sessionId);
 
@@ -709,8 +739,8 @@
     if (initialProject) {
       await setProject(initialProject, false);
     }
-    populateProjectSelect();
-    renderRecentProjects();
+    renderProjectList();
+    renderWorkspaceList();
     restoreSessions(); // T2.6：恢复历史会话为灰标签
   }
 
@@ -846,25 +876,46 @@
     }
   }
 
-  function renderRecentProjects() {
-    const list = appConfig.recentProjects || [];
-    els.recentList.innerHTML = '';
-    if (list.length === 0) {
-      els.recentProjects.classList.add('hidden');
+  // 工作区列表：状态点（运行中/空闲）+ 名称 + 分支（等宽、右对齐）
+  function renderWorkspaceList() {
+    const ul = els.workspaceList;
+    if (!ul) return;
+    ul.innerHTML = '';
+
+    if (!projectPath) {
+      ul.innerHTML = '<li class="list-empty">打开项目后显示工作区</li>';
       return;
     }
-    els.recentProjects.classList.remove('hidden');
-    for (const p of list.slice(0, 5)) {
+
+    const wss = workspaceCache.filter(w => w.kind === 'managed');
+    if (wss.length === 0) {
+      ul.innerHTML = '<li class="list-empty">还没有工作区，点下面的 Agent 启动</li>';
+      return;
+    }
+
+    const runningIds = new Set();
+    for (const s of sessions.values()) {
+      if (s.workspaceId && !s.exited) runningIds.add(s.workspaceId);
+    }
+
+    for (const w of wss) {
+      const running = runningIds.has(w.id);
       const li = document.createElement('li');
-      li.className = 'recent-item';
-      li.title = p;
-      const name = p.replace(/\\/g, '/').split('/').pop();
+      li.className = 'ws-item'
+        + (running ? ' is-running' : '')
+        + (w.status === 'broken' ? ' is-broken' : '');
+      li.title = `${w.worktreePath}\n分支：${w.branch || '—'}`;
       li.innerHTML = `
-        <span class="recent-name">${escapeHtml(name)}</span>
-        <span class="recent-path">${escapeHtml(p)}</span>
+        <span class="ws-dot"></span>
+        <span class="ws-name">${escapeHtml(workspaceLabel(w))}</span>
+        <span class="ws-branch">${escapeHtml(w.branch || '')}</span>
       `;
-      li.addEventListener('click', () => setProject(p));
-      els.recentList.appendChild(li);
+      li.addEventListener('click', async () => {
+        if (w.status === 'missing' || w.status === 'broken') return;
+        expSelection = w.id;
+        await syncExplorerRoot();
+      });
+      ul.appendChild(li);
     }
   }
 
@@ -965,6 +1016,7 @@
 
     const res = await window.api.listWorkspaces({ projectPath });
     workspaceCache = res.success ? (res.workspaces || []) : [];
+    renderWorkspaceList(); // 侧栏工作区列表跟随缓存刷新
 
     const kindLabel = { default: '默认', managed: '工具', external: '外部' };
     for (const w of workspaceCache) {
@@ -1080,18 +1132,24 @@
       // T3.3：scratch 目录（.agent-manager）显示"临时"角标，不参与改动标色
       const isScratch = entry.isDir && entry.name === '.agent-manager';
       if (isScratch) item.classList.add('is-scratch');
-      // worktree 改动标色：新增=绿，其他改动=琥珀（scratch 目录跳过）
+      // git 装饰色：按编辑器通行约定（新增=绿、修改=琥珀、删除=红、未跟踪=绿）
       let modClass = '';
       if (!entry.isDir && !isScratch && changedMap.has(rel)) {
         const status = changedMap.get(rel);
-        modClass = status === '??' ? ' is-new' : ' is-modified';
-        item.title = `${rel}（${status === '??' ? '新增' : '已修改'}）`;
+        const kind = status === '??' ? 'new' : status[0] === 'A' ? 'added'
+          : status[0] === 'D' ? 'deleted' : status[0] === 'R' ? 'renamed' : 'modified';
+        modClass = ` is-${kind}`;
+        const label = { new: '未跟踪', added: '新增', deleted: '已删除', renamed: '已重命名', modified: '已修改' }[kind];
+        item.title = `${rel}（${label}）`;
       }
       item.className += modClass;
       const scratchBadge = isScratch ? '<span class="tree-badge">临时</span>' : '';
+      // 文件图标按类型着色，遵循编辑器通行约定
+      const ext = entry.isDir ? '' : (entry.name.split('.').pop() || '').toLowerCase();
+      const typeCls = entry.isDir ? 'is-folder' : `is-${ext}`;
       item.innerHTML = `
         <span class="tree-caret">${entry.isDir ? icon('chevron-right', 'icon icon-caret') : ''}</span>
-        <span class="tree-icon">${entry.isDir ? icon('folder', 'icon icon-node') : icon('file', 'icon icon-node')}</span>
+        <span class="tree-icon ${typeCls}">${entry.isDir ? icon('folder', 'icon icon-node') : icon('file', 'icon icon-node')}</span>
         <span class="tree-name">${escapeHtml(entry.name)}</span>
         ${scratchBadge}
       `;
@@ -1590,13 +1648,6 @@
     if (e.key === 'Escape' && els.settingsModal.classList.contains('open')) closeSettings();
   });
 
-  // 项目选择器：切换当前 UI 上下文
-  els.projectSelect.addEventListener('change', () => {
-    const path = els.projectSelect.value;
-    if (path && path !== projectPath) {
-      setProject(path);
-    }
-  });
   els.btnCollapseSidebar.addEventListener('click', toggleSidebar);
   els.btnExpandSidebar.addEventListener('click', toggleSidebar);
   els.btnCollapseExplorer.addEventListener('click', toggleExplorer);
